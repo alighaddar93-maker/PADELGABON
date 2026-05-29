@@ -1,0 +1,17 @@
+{
+  "name": "padelgabon_pwa_1",
+  "version": "1.0.0",
+  "description": "PadelGabon PWA — Réservation de courts de padel à Libreville",
+  "scripts": {
+    "dev":           "node server.js",
+    "test":          "playwright test",
+    "test:smoke":    "playwright test --grep @smoke",
+    "test:critical": "playwright test --grep \"\\[C-\"",
+    "test:high":     "playwright test --grep \"\\[H-\"",
+    "test:headed":   "playwright test --headed",
+    "report":        "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
+}
