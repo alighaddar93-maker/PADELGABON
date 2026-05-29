@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PadelGabon</title>
 <link rel="manifest" href="./manifest.json">
 <meta name="theme-color" content="#1A7A4A">
@@ -11,8 +11,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PadelGabon">
 <link rel="apple-touch-icon" href="./icon-192.png">
+<!-- Config locale (gitignored) -->
+<script src="./config.js"></script>
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./supabase-client.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+button:focus-visible,.sl:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid #1A7A4A;outline-offset:2px}
 body{font-family:system-ui,sans-serif;background:#0a0a0a;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:16px 8px;gap:16px}
 .albl{color:#444;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;text-align:center}
 .dual{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;width:100%;max-width:760px}
@@ -176,6 +182,8 @@ body { justify-content: center; padding: 0; background: #0a0a0a; }
 </style>
 </head>
 <body>
+<div style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#B71C1C;color:#fff;font-size:11px;font-weight:700;text-align:center;padding:5px 8px;letter-spacing:.5px">⚠️ MODE DÉMO — Ne saisissez pas de données réelles. Aucune donnée n'est sauvegardée.</div>
+<div style="height:28px"></div>
 <div style="display:flex;justify-content:center;align-items:center;min-height:100vh;background:#0a0a0a">
   <div id="msg-toast" class="mtoast"></div>
   <div class="phone">
@@ -570,14 +578,17 @@ var DB={
   ],
   reservations:{},
   tournaments:[
-    {name:'Open de Libreville 2026',club:'Padel Arena',date:'14-15 juin',max:32,inscrits:20,prix:5000,type:'Mixte',status:'open'},
-    {name:'Championnat Gabon Padel',club:'Club Omnisports',date:'5-6 juillet',max:32,inscrits:8,prix:15000,type:'Doubles',status:'soon'},
-    {name:'Akanda Summer Cup',club:'SportPark Akanda',date:'20 juillet',max:24,inscrits:24,prix:3000,type:'Simple',status:'full'}
+    {name:'Open de Libreville 2026',club:'Padel Arena',startDate:'2026-06-14',endDate:'2026-06-15',max:32,inscrits:20,prix:5000,type:'Mixte',status:'open'},
+    {name:'Championnat Gabon Padel',club:'Club Omnisports',startDate:'2026-07-05',endDate:'2026-07-06',max:32,inscrits:8,prix:15000,type:'Doubles',status:'soon'},
+    {name:'Akanda Summer Cup',club:'SportPark Akanda',startDate:'2026-07-20',endDate:'2026-07-20',max:24,inscrits:24,prix:3000,type:'Simple',status:'full'}
   ]
 };
 
 // STATE
 var curCI=0,curCourtI=0,curDur=0,curMachine=false,curExtras=[],curDateKey='',lvlFilter='Tous';
+var sbLoaded=false; // true quand Supabase est connecté
+DB.reservationIds={}; // maps local rk() key → Supabase reservation UUID
+DB.currentPlayer={name:'Joueur',phone:''};
 
 // HELPERS
 function padZ(n){return n<10?'0'+n:String(n);}
@@ -591,6 +602,16 @@ function fmtDK(dk){
   var mn=['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
   return dn[d.getDay()]+' '+d.getDate()+' '+mn[d.getMonth()];
 }
+function fmtTDate(t){
+  var mn=['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
+  var d1=new Date(t.startDate);
+  var d2=t.endDate&&t.endDate!==t.startDate?new Date(t.endDate):null;
+  var m=mn[d1.getMonth()];
+  return d2?d1.getDate()+'-'+d2.getDate()+' '+m:d1.getDate()+' '+m;
+}
+function fmtXAF(n){return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' XAF';}
+function fmtN(n){return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g,' ');}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function rk(ci,coi,dk,t){return ci+'-'+coi+'-'+dk+'-'+t;}
 function isBooked(ci,coi,dk,sM,eM){
   // Check every 30-min block in the requested range
@@ -626,7 +647,7 @@ function renderHomeClubs(){
       var c=DB.clubs[idx];
       var open=c.courts.filter(function(x){return x.open;}).length;
       var card=document.createElement('div');card.className='card';
-      card.innerHTML='<div class="cn">'+c.name+'</div>'+
+      card.innerHTML='<div class="cn">'+esc(c.name)+'</div>'+
         '<div class="cs">📍 '+c.loc+' · '+c.courts.length+' courts · Ouvert '+c.openFrom+'h-'+c.openTo+'h</div>'+
         '<div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap">'+
           '<span class="bdg bg">'+open+' courts ouverts</span>'+
@@ -644,13 +665,13 @@ function loadClub(){
   var cl=DB.clubs[curCI];
   document.getElementById('club-title').textContent=cl.name;
   document.getElementById('club-hours-sub').textContent='Ouvert '+cl.openFrom+'h00 - '+cl.openTo+'h00';
-  document.getElementById('dp60').textContent=cl.prices[60].toLocaleString()+' XAF';
-  document.getElementById('dp90').textContent=cl.prices[90].toLocaleString()+' XAF';
-  document.getElementById('dp120').textContent=cl.prices[120].toLocaleString()+' XAF';
+  document.getElementById('dp60').textContent=fmtXAF(cl.prices[60])+'';
+  document.getElementById('dp90').textContent=fmtXAF(cl.prices[90])+'';
+  document.getElementById('dp120').textContent=fmtXAF(cl.prices[120])+'';
   document.getElementById('cf-club').textContent=cl.name;
   if(cl.hasMachine){
     document.getElementById('machine-sec').style.display='block';
-    document.getElementById('mach-price').textContent=cl.machinePrice.toLocaleString()+' XAF';
+    document.getElementById('mach-price').textContent=fmtXAF(cl.machinePrice)+'';
     document.getElementById('mach-balls').textContent=cl.machineBalls;
     var cb=document.getElementById('mach-cb');cb.classList.remove('on');cb.textContent='';curMachine=false;
   }else document.getElementById('machine-sec').style.display='none';
@@ -765,6 +786,9 @@ function buildSlots(){
   var noMsg=document.getElementById('no-slots-msg');
   var count=0;
   document.getElementById('court-lbl-info').textContent=court.name+' · '+fmtDK(curDateKey);
+  var now=new Date();
+  var todayKey=mkDK(now);
+  var nowM=now.getHours()*60+now.getMinutes();
   // Loop from opening hour to closing hour, every 30 min
   for(var h=from;h<to;h++){
     for(var mn=0;mn<60;mn+=30){
@@ -772,6 +796,8 @@ function buildSlots(){
       var eM=sM+curDur;
       // Session must END by closing time
       if(eM>to*60)continue;
+      // Don't show past slots for today
+      if(curDateKey===todayKey&&sM<=nowM)continue;
       count++;
       var div=document.createElement('div');
       div.className='sl';
@@ -779,8 +805,11 @@ function buildSlots(){
       var taken=!court.open||isBooked(curCI,curCourtI,curDateKey,sM,eM);
       if(taken){
         div.classList.add('taken');
+        div.setAttribute('aria-label','Réservé — '+tStr(sM));
+        div.textContent=tStr(sM)+' ✕';
       }else{
         div.classList.add('free');
+        div.setAttribute('aria-label','Disponible — '+tStr(sM));
         (function(sStart,sEnd,slDiv){
           slDiv.onclick=function(){
             var picked=document.querySelectorAll('.sl.picked');
@@ -812,7 +841,7 @@ function showConfirm(sM,eM){
     row.style.borderBottom=i===cl.extras.length-1?'none':'1px solid #f0f0f0';
     var cb=document.createElement('div');cb.className='excb';cb.id='ecb'+i;
     var nm=document.createElement('span');nm.style.cssText='font-size:12px;flex:1;color:#111';nm.textContent=cl.extras[i].n;
-    var pr=document.createElement('span');pr.style.cssText='font-size:12px;font-weight:700;color:#1A7A4A';pr.textContent=cl.extras[i].p.toLocaleString()+' XAF';
+    var pr=document.createElement('span');pr.style.cssText='font-size:12px;font-weight:700;color:#1A7A4A';pr.textContent=fmtXAF(cl.extras[i].p)+'';
     row.appendChild(cb);row.appendChild(nm);row.appendChild(pr);
     (function(idx){row.onclick=function(){toggleExt(idx);};})(i);
     el2.appendChild(row);
@@ -830,21 +859,43 @@ function confirmResa(){
   var cb=document.getElementById('conf-box');
   var sM=parseInt(cb.dataset.sm),eM=parseInt(cb.dataset.em);
   var cl=DB.clubs[curCI],court=cl.courts[curCourtI];
-  // Block ALL 30-min slots for the full duration
-  // dur=60 (1h): blocks sM and sM+30 (2 slots)
-  // dur=90 (1h30): blocks sM, sM+30, sM+60 (3 slots)  
-  // dur=120 (2h): blocks sM, sM+30, sM+60, sM+90 (4 slots)
-  var numSlots = curDur / 30; // number of 30-min blocks
-  for(var s=0; s<numSlots; s++){
+  var numSlots=curDur/30;
+
+  // ── Sauvegarder dans Supabase si connecté ──
+  if(sbLoaded && cl._id && court._id){
+    var total=cl.prices[curDur]||0;
+    if(curMachine) total+=cl.machinePrice;
+    curExtras.forEach(function(on,i){if(on&&cl.extras[i])total+=cl.extras[i].p;});
+    var resaData={
+      club_id:cl._id, court_id:court._id,
+      player_name:DB.currentPlayer.name||'Joueur',
+      player_phone:DB.currentPlayer.phone||'',
+      date_key:curDateKey,
+      start_minutes:sM, end_minutes:eM, duration:curDur,
+      use_machine:curMachine,
+      extras:curExtras.map(function(on,i){return on&&cl.extras[i]?cl.extras[i]:null;}).filter(Boolean),
+      total_amount:total, status:'confirmed'
+    };
+    sbCreateReservation(resaData).then(function(saved){
+      // Stocker l'ID Supabase pour pouvoir annuler plus tard
+      for(var s=0;s<numSlots;s++){
+        DB.reservationIds[rk(curCI,curCourtI,curDateKey,sM+(s*30))]=saved.id;
+      }
+      // Envoyer notification au club via Supabase
+      sbAddNotif(cl._id,'reservation','🎾 Nouvelle réservation',
+        court.name+' · '+fmtDK(curDateKey)+' · '+tStr(sM)+'-'+tStr(eM),
+        {court:court.name,dateKey:curDateKey,startMin:sM,endMin:eM,player:DB.currentPlayer.name});
+    }).catch(function(e){ console.log('Supabase save failed:',e.message); });
+  }
+
+  // ── Mise à jour locale immédiate ──
+  for(var s=0;s<numSlots;s++){
     DB.reservations[rk(curCI,curCourtI,curDateKey,sM+(s*30))]=true;
   }
-  // Success page
   document.getElementById('s-resa-d').textContent=court.name+' · '+court.type+'\n'+fmtDK(curDateKey)+'\n'+tStr(sM)+' → '+tStr(eM)+' ('+durLbl(curDur)+')\n'+cl.name;
   document.getElementById('s-code').textContent=rCode();
   addToHistory(cl.name,court.name+' · '+court.type,fmtDK(curDateKey),tStr(sM),tStr(eM),curCI,curCourtI,curDateKey,sM,eM);
   if(typeof addClubNotif==='function') addClubNotif(curCI,court.name,fmtDK(curDateKey),tStr(sM),tStr(eM));
-  // Notify club panel if this club is connected
-  addClubNotif(curCI, court.name, fmtDK(curDateKey), tStr(sM), tStr(eM));
   buildSlots();
   document.getElementById('conf-box').style.display='none';
   gP('p-resa-ok');
@@ -886,7 +937,6 @@ function addToHistory(clubName,courtInfo,dateStr,startT,endT,ci,coi,dk,sm,em){
 function cancelResa(id){
   var el=document.getElementById(id);
   if(!el) return;
-  // Unblock slots in DB.reservations
   var ci=parseInt(el.dataset.ci);
   var coi=parseInt(el.dataset.coi);
   var dk=el.dataset.dk;
@@ -894,6 +944,12 @@ function cancelResa(id){
   var em=parseInt(el.dataset.em);
   if(!isNaN(ci) && !isNaN(coi) && dk && !isNaN(sm) && !isNaN(em)){
     var numSlots=(em-sm)/30;
+    // ── Annuler dans Supabase si connecté ──
+    if(sbLoaded){
+      var key=rk(ci,coi,dk,sm);
+      var sbId=DB.reservationIds[key];
+      if(sbId) sbCancelReservation(sbId).catch(function(e){console.log('Cancel failed:',e.message);});
+    }
     for(var s=0;s<numSlots;s++){
       var key=rk(ci,coi,dk,sm+(s*30));
       delete DB.reservations[key];
@@ -921,7 +977,7 @@ function toggleMachine(){
   var cb=document.getElementById('mach-cb');
   if(curMachine){cb.classList.add('on');cb.textContent='✓';}else{cb.classList.remove('on');cb.textContent='';}
   var row=document.getElementById('cf-mach'),cl=DB.clubs[curCI];
-  if(curMachine&&cl.hasMachine){row.style.display='flex';document.getElementById('cf-mach-v').textContent=cl.machinePrice.toLocaleString()+' XAF ('+cl.machineBalls+')';}
+  if(curMachine&&cl.hasMachine){row.style.display='flex';document.getElementById('cf-mach-v').textContent=fmtXAF(cl.machinePrice)+' ('+cl.machineBalls+')';}
   else row.style.display='none';
   var c=document.getElementById('conf-box');updateTotal(parseInt(c.dataset.sm),parseInt(c.dataset.em));
 }
@@ -931,12 +987,12 @@ function updateTotal(sM,eM){
   var total=cl.prices[curDur]||0;
   for(var i=0;i<cl.extras.length;i++)if(curExtras[i])total+=cl.extras[i].p;
   if(curMachine&&cl.hasMachine)total+=cl.machinePrice;
-  document.getElementById('cf-total').textContent=total.toLocaleString()+' XAF';
+  document.getElementById('cf-total').textContent=fmtXAF(total)+'';
   var er=document.getElementById('cf-extras');er.innerHTML='';
   for(var i=0;i<cl.extras.length;i++){
     if(curExtras[i]){
       var row=document.createElement('div');row.className='cr';
-      row.innerHTML='<span class="cl2">'+cl.extras[i].n+'</span><span class="cv">'+cl.extras[i].p.toLocaleString()+' XAF</span>';
+      row.innerHTML='<span class="cl2">'+esc(cl.extras[i].n)+'</span><span class="cv">'+fmtXAF(cl.extras[i].p)+'</span>';
       er.appendChild(row);
     }
   }
@@ -953,9 +1009,9 @@ function renderCoaches(){
       var d=document.createElement('div');d.className='coch';
       var av=document.createElement('div');av.style.cssText='width:36px;height:36px;border-radius:50%;background:'+c.bg+';color:'+c.tc+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0';av.textContent=c.init;
       var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+c.n+'</div><div style="font-size:10px;color:#666;margin-top:2px">'+c.court+' · '+c.level+'<br>'+c.price+' · '+c.slots.join(' · ')+'</div>';
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+esc(c.n)+'</div><div style="font-size:10px;color:#666;margin-top:2px">'+esc(c.court)+' · '+esc(c.level)+'<br>'+esc(c.price)+' · '+esc(c.slots.join(' \xb7 '))+'</div>';
       var btn=document.createElement('button');btn.style.cssText='font-size:11px;padding:4px 8px;border-radius:7px;border:1px solid #1A3A8A;color:#1A3A8A;background:#E6F1FB;cursor:pointer';btn.textContent='Réserver';
-      btn.onclick=function(){document.getElementById('s-coach-d').textContent='Coach : '+c.n+'\n'+c.court+' · '+c.slots[0]+'\n'+DB.clubs[curCI].name;gP('p-coach-ok');};
+      btn.onclick=function(){document.getElementById('s-coach-d').textContent='Coach : '+esc(c.n)+'\n'+esc(c.court)+' · '+c.slots[0]+'\n'+DB.clubs[curCI].name;gP('p-coach-ok');};
       d.appendChild(av);d.appendChild(info);d.appendChild(btn);list.appendChild(d);
     })(cl.coaches[i]);
   }
@@ -973,7 +1029,7 @@ function renderPlayers(list){
     // Avatar + info
     var av=document.createElement('div');av.style.cssText='width:34px;height:34px;border-radius:50%;background:'+p.bg+';color:'+p.tc+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0';av.textContent=p.i;
     var info=document.createElement('div');info.style.flex='1';
-    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+p.n+'</div>'+
+    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+esc(p.n)+'</div>'+
       '<div style="margin-top:2px"><span style="font-size:9px;padding:1px 5px;border-radius:4px;background:'+lbg+';color:'+ltc+';font-weight:600">'+p.lv+'</span> <span style="font-size:10px;color:#aaa">'+p.g+' matchs</span></div>';
     // Invite button - use closure to capture player name
     var btn=document.createElement('button');
@@ -990,14 +1046,18 @@ function filterLvl(l){lvlFilter=l;renderPlayers(DB.players);}
 
 function renderShop(){
   var g=document.getElementById('shop-products');g.innerHTML='';
+  var notice=document.createElement('div');
+  notice.style.cssText='grid-column:1/-1;background:#FFF8E1;border:1px solid #FFD54F;border-radius:8px;padding:8px 10px;font-size:11px;color:#5D4037;text-align:center;margin-bottom:4px';
+  notice.textContent='Catalogue de référence — pour commander, contactez directement le club.';
+  g.appendChild(notice);
   for(var i=0;i<DB.products.length;i++){
     var p=DB.products[i];
     var card=document.createElement('div');card.className='card';card.style.cursor='default';
     var img=document.createElement('div');img.style.cssText='height:54px;border-radius:8px;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:5px;overflow:hidden';
     if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:100%;object-fit:cover';img.appendChild(im);}else img.textContent=p.em;
     card.appendChild(img);
-    card.innerHTML+='<div style="font-size:11px;font-weight:700;color:#111">'+p.n+'</div><div style="font-size:10px;color:#666">'+p.b+'</div>'+
-      '<div style="font-size:12px;font-weight:700;color:#1A7A4A;margin-top:3px">'+p.p.toLocaleString()+' <span style="font-size:9px;color:#aaa;text-decoration:line-through">'+p.o.toLocaleString()+'</span></div>'+
+    card.innerHTML+='<div style="font-size:11px;font-weight:700;color:#111">'+esc(p.n)+'</div><div style="font-size:10px;color:#666">'+esc(p.b)+'</div>'+
+      '<div style="font-size:12px;font-weight:700;color:#1A7A4A;margin-top:3px">'+fmtN(p.p)+' <span style="font-size:9px;color:#aaa;text-decoration:line-through">'+fmtN(p.o)+'</span></div>'+
       '<div style="font-size:9px;background:#FCEBEB;color:#791F1F;border-radius:3px;padding:1px 5px;display:inline-block;margin-top:2px">-'+Math.round((1-p.p/p.o)*100)+'%</div>';
     g.appendChild(card);
   }
@@ -1043,24 +1103,24 @@ function renderAdminClubs(){
       if(c.suspended){
         sc++;
         main.innerHTML='<div class="cdot" style="background:#E24B4A"></div>'+
-          '<div class="cinfo"><div class="cname-a">'+c.name+'</div><div class="cmeta" style="color:#F09595">'+c.suspendedReason+'</div></div>';
+          '<div class="cinfo"><div class="cname-a">'+esc(c.name)+'</div><div class="cmeta" style="color:#F09595">'+c.suspendedReason+'</div></div>';
         var acts=document.createElement('div');acts.style='display:flex;gap:4px';
         var re=document.createElement('button');re.className='be';re.textContent='✓ Réactiver';
         re.style.cssText='background:#E1F5EE;color:#085041;border:none;border-radius:5px;padding:3px 7px;font-size:10px;font-weight:600;cursor:pointer';
         re.onclick=function(){DB.clubs[idx].suspended=false;DB.clubs[idx].suspendedReason='';renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();showMsg('✅ Réactivé !');};
         var dl=document.createElement('button');dl.className='bd';dl.textContent='🗑 Suppr.';
-        dl.onclick=function(){showIC(row,'Supprimer '+c.name+' ?',function(){DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
+        dl.onclick=function(){showIC(row,'Supprimer '+esc(c.name)+' ?',function(){DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
         acts.appendChild(re);acts.appendChild(dl);main.appendChild(acts);row.appendChild(main);SL.appendChild(row);
       }else{
         ac++;
         main.innerHTML='<div class="cdot" style="background:#1A7A4A"></div>'+
-          '<div class="cinfo"><div class="cname-a">'+c.name+'</div><div class="cmeta">'+c.loc+' · '+c.courts.length+' courts · '+c.openFrom+'h-'+c.openTo+'h</div></div>';
+          '<div class="cinfo"><div class="cname-a">'+esc(c.name)+'</div><div class="cmeta">'+c.loc+' · '+c.courts.length+' courts · '+c.openFrom+'h-'+c.openTo+'h</div></div>';
         var acts=document.createElement('div');acts.style='display:flex;gap:4px';
         var ge=document.createElement('button');ge.className='be';ge.textContent='Gérer';ge.onclick=function(){openEditClub(idx);};
         var sp=document.createElement('button');sp.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FAEEDA;color:#633806;border:none;cursor:pointer;font-weight:600';sp.textContent='⏸';
-        sp.onclick=function(){showIC(row,'Suspendre '+c.name+' ?',function(){DB.clubs[idx].suspended=true;DB.clubs[idx].suspendedReason='Suspendu manuellement';renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx){cpLogout();}showMsg('⚠️ Suspendu.');});};
+        sp.onclick=function(){showIC(row,'Suspendre '+esc(c.name)+' ?',function(){DB.clubs[idx].suspended=true;DB.clubs[idx].suspendedReason='Suspendu manuellement';renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx){cpLogout();}showMsg('⚠️ Suspendu.');});};
         var dl=document.createElement('button');dl.className='bd';dl.textContent='✕';
-        dl.onclick=function(){showIC(row,'Supprimer '+c.name+' ?',function(){DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
+        dl.onclick=function(){showIC(row,'Supprimer '+esc(c.name)+' ?',function(){DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
         acts.appendChild(ge);acts.appendChild(sp);acts.appendChild(dl);main.appendChild(acts);row.appendChild(main);AL.appendChild(row);
       }
     })(i);
@@ -1162,7 +1222,7 @@ function renderEditCourts(ci){
       var row=document.createElement('div');row.style.cssText='background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444;overflow:hidden';
       var main=document.createElement('div');main.style.cssText='display:flex;align-items:center;gap:7px;padding:7px 8px';
       var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(ct.name)+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+esc(ct.type)+'</div>';
       var tog=document.createElement('div');tog.className='tog '+(ct.open?'on':'off');tog.style.marginRight='4px';
       (function(ci3,cj3,t){t.onclick=function(){DB.clubs[ci3].courts[cj3].open=!DB.clubs[ci3].courts[cj3].open;t.classList.toggle('on');t.classList.toggle('off');};})(ci2,cj,tog);
       var del=document.createElement('button');del.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FCEBEB;color:#791F1F;border:none;cursor:pointer;font-weight:700';del.textContent='🗑';
@@ -1170,7 +1230,7 @@ function renderEditCourts(ci){
         del.onclick=function(){
           var cf=row.querySelector('.iconfirm');if(cf){cf.remove();return;}
           var cfRow=document.createElement('div');cfRow.className='iconfirm';
-          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Supprimer '+DB.clubs[ci3].courts[cj3].name+' ?</span>';
+          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Supprimer '+esc(DB.clubs[ci3].courts[cj3].name)+' ?</span>';
           var yes=document.createElement('button');yes.style.cssText='font-size:11px;padding:3px 8px;border-radius:5px;background:#791F1F;color:#fff;border:none;cursor:pointer;font-weight:700;margin-left:6px';yes.textContent='✓ Oui';
           yes.onclick=function(){DB.clubs[ci3].courts.splice(cj3,1);renderEditCourts(ci3);renderAdminClubs();};
           var no=document.createElement('button');no.style.cssText='font-size:11px;padding:3px 7px;border-radius:5px;background:#2A3444;color:#aaa;border:none;cursor:pointer;margin-left:4px';no.textContent='Non';no.onclick=function(){cfRow.remove();};
@@ -1210,7 +1270,7 @@ function renderAdminCourts(){
       var ct=DB.clubs[ci2].courts[cj];
       var row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:7px;padding:7px 8px;background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444';
       var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(ct.name)+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+esc(ct.type)+'</div>';
       var badge=document.createElement('span');badge.className='aobadge '+(ct.open?'aob-g':'aob-r');badge.textContent=ct.open?'✓ Ouvert':'✗ Fermé';
       var tog=document.createElement('div');tog.className='tog '+(ct.open?'on':'off');tog.style.marginLeft='5px';
       (function(ci3,cj3,t,b){
@@ -1225,9 +1285,9 @@ function renderAdminCourts(){
   }
   document.getElementById('prices-list').innerHTML=
     '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">Ouverture</div><div class="revam">'+cl.openFrom+'h00 - '+cl.openTo+'h00</div></div>'+
-    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h</div><div class="revam">'+cl.prices[60].toLocaleString()+' XAF</div></div>'+
-    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h30</div><div class="revam">'+cl.prices[90].toLocaleString()+' XAF</div></div>'+
-    '<div class="revrow" style="border:none"><div style="flex:1;font-size:12px;color:#aaa">2h</div><div class="revam">'+cl.prices[120].toLocaleString()+' XAF</div></div>';
+    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h</div><div class="revam">'+fmtXAF(cl.prices[60])+'</div></div>'+
+    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h30</div><div class="revam">'+fmtXAF(cl.prices[90])+'</div></div>'+
+    '<div class="revrow" style="border:none"><div style="flex:1;font-size:12px;color:#aaa">2h</div><div class="revam">'+fmtXAF(cl.prices[120])+'</div></div>';
 }
 
 function renderAdminProducts(){
@@ -1239,7 +1299,7 @@ function renderAdminProducts(){
       var em=document.createElement('div');em.className='prodem';
       if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:100%;object-fit:cover';em.appendChild(im);}else em.textContent=p.em;
       var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:11px;font-weight:700;color:#fff">'+p.n+'</div><div style="font-size:10px;color:#4CD68A;margin-top:1px">'+p.p.toLocaleString()+' XAF</div>';
+      info.innerHTML='<div style="font-size:11px;font-weight:700;color:#fff">'+esc(p.n)+'</div><div style="font-size:10px;color:#4CD68A;margin-top:1px">'+fmtXAF(p.p)+'</div>';
       var acts=document.createElement('div');acts.style='display:flex;gap:4px';
       var eb=document.createElement('button');eb.className='be';eb.textContent='✏️';eb.onclick=function(){oForm('edit-product',idx);};
       var db=document.createElement('button');db.className='bd';db.textContent='✕';
@@ -1259,7 +1319,7 @@ function renderAdminPubs(){
       if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:60px;object-fit:cover;border-radius:6px;margin-bottom:6px';im.onerror=function(){this.style.display='none';};row.appendChild(im);}
       var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start';
       var tb=p.t==='Magasin'?'aob-a':'aob-g';
-      top.innerHTML='<div><div style="font-size:12px;font-weight:700;color:#fff">'+p.n+'</div><div style="font-size:10px;color:#445;margin-top:1px">'+p.cl+' · '+p.p.toLocaleString()+' XAF/mois</div></div><span class="aobadge '+tb+'">'+p.t+'</span>';
+      top.innerHTML='<div><div style="font-size:12px;font-weight:700;color:#fff">'+esc(p.n)+'</div><div style="font-size:10px;color:#445;margin-top:1px">'+esc(p.cl)+' · '+fmtXAF(p.p)+'/mois</div></div><span class="aobadge '+tb+'">'+esc(p.t)+'</span>';
       var stats=document.createElement('div');stats.style='display:flex;gap:8px;margin-top:5px;align-items:center';
       stats.innerHTML='<div style="font-size:10px;color:#aaa">👁 <span style="color:#4CD68A;font-weight:700">'+p.v+'</span></div><div style="font-size:10px;color:#aaa">🖱 <span style="color:#4CD68A;font-weight:700">'+p.ck+'</span></div>';
       var db=document.createElement('button');db.className='bd';db.style.marginLeft='auto';db.textContent='Retirer';
@@ -1277,7 +1337,7 @@ function renderRevUnpaid(){
     (function(idx){
       if(DB.clubs[idx].suspended){found=true;
         var row=document.createElement('div');row.className='clubrow';
-        row.innerHTML='<div class="cdot" style="background:#E24B4A"></div><div class="cinfo"><div class="cname-a">'+DB.clubs[idx].name+'</div><div class="cmeta" style="color:#F09595">'+DB.clubs[idx].suspendedReason+'</div></div>';
+        row.innerHTML='<div class="cdot" style="background:#E24B4A"></div><div class="cinfo"><div class="cname-a">'+esc(DB.clubs[idx].name)+'</div><div class="cmeta" style="color:#F09595">'+esc(DB.clubs[idx].suspendedReason)+'</div></div>';
         var re=document.createElement('button');re.className='be';re.textContent='✓ Réactiver';
         re.onclick=function(){DB.clubs[idx].suspended=false;DB.clubs[idx].suspendedReason='';renderAdminClubs();renderRevUnpaid();renderHomeClubs();cpInit();showMsg('✅ Réactivé !');};
         row.appendChild(re);list.appendChild(row);
@@ -1358,8 +1418,8 @@ function oForm(type,idx){
   }else if(type==='edit-product'){
     var p=DB.products[idx];
     h='<div class="aft">✏️ Modifier produit<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom</div><input class="afi" id="ep-nm" value="'+p.n+'">'+
-      '<div class="afl">Marque</div><input class="afi" id="ep-br" value="'+p.b+'">'+
+      '<div class="afl">Nom</div><input class="afi" id="ep-nm" value="'+esc(p.n)+'">'+
+      '<div class="afl">Marque</div><input class="afi" id="ep-br" value="'+esc(p.b)+'">'+
       '<div class="af2"><div><div class="afl">Prix</div><input class="afi" type="number" id="ep-p" value="'+p.p+'"></div>'+
         '<div><div class="afl">Ancien prix</div><input class="afi" type="number" id="ep-o" value="'+p.o+'"></div></div>'+
       '<div class="afl">Photo</div>'+
@@ -1385,8 +1445,8 @@ function oForm(type,idx){
   }else if(type==='edit-trn'){
     var t=DB.tournaments[idx];
     h='<div class="aft">✏️ Modifier tournoi<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom</div><input class="afi" id="nt-nm" value="'+t.name+'">'+
-      '<div class="afl">Club</div><input class="afi" id="nt-club" value="'+t.club+'">'+
+      '<div class="afl">Nom</div><input class="afi" id="nt-nm" value="'+esc(t.name)+'">'+
+      '<div class="afl">Club</div><input class="afi" id="nt-club" value="'+esc(t.club)+'">'+
       '<div class="afl">Date</div><input class="afi" id="nt-date" value="'+t.date+'">'+
       '<div class="af2">'+
         '<div><div class="afl">Max joueurs</div><input class="afi" type="number" id="nt-max" value="'+t.max+'"></div>'+
@@ -1402,7 +1462,7 @@ function oForm(type,idx){
     var ci=parseInt(document.getElementById('coach-club-sel').value);
     var cl=DB.clubs[ci];
     // Build court options
-    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+c.name+'">'+c.name+'</option>';}).join('');
+    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+esc(c.name)+'">'+esc(c.name)+'</option>';}).join('');
     h='<div class="aft">🎓 Ajouter un coach<button class="afc" onclick="closeForm()">✕</button></div>'+
       '<div style="font-size:11px;color:#4CD68A;margin-bottom:8px">'+cl.name+'</div>'+
       '<div class="afl">Nom complet</div><input class="afi" id="ac-name" placeholder="Ex: Marco Silva">'+
@@ -1417,10 +1477,10 @@ function oForm(type,idx){
   }else if(type==='edit-coach'){
     var ci=idx.ci, cj=idx.cj;
     var cl=DB.clubs[ci], coach=cl.coaches[cj];
-    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+c.name+'"'+(c.name===coach.court?' selected':'')+'>'+c.name+'</option>';}).join('');
+    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+esc(c.name)+'"'+(c.name===coach.court?' selected':'')+'>'+esc(c.name)+'</option>';}).join('');
     h='<div class="aft">✏️ Modifier coach<button class="afc" onclick="closeForm()">✕</button></div>'+
       '<div style="font-size:11px;color:#4CD68A;margin-bottom:8px">'+cl.name+'</div>'+
-      '<div class="afl">Nom complet</div><input class="afi" id="ac-name" value="'+coach.n+'">'+
+      '<div class="afl">Nom complet</div><input class="afi" id="ac-name" value="'+esc(coach.n)+'">'+
       '<div class="afl">Initiales</div><input class="afi" id="ac-init" value="'+coach.init+'" maxlength="2">'+
       '<div class="afl">Court assigné</div><select class="afi" id="ac-court">'+courtOpts+'</select>'+
       '<div class="afl">Niveau / Description</div><input class="afi" id="ac-level" value="'+coach.level+'">'+
@@ -1503,10 +1563,12 @@ function saveProd(idx){
 function addTournament(){
   var nm=document.getElementById('nt-nm').value.trim();
   if(!nm){showMsg('Remplis le nom !');return;}
+  var d=document.getElementById('nt-date').value||new Date().toISOString().slice(0,10);
   DB.tournaments.push({
     name:nm,
     club:document.getElementById('nt-club').value||'Padel Arena',
-    date:document.getElementById('nt-date').value||'À définir',
+    startDate:d,
+    endDate:d,
     max:parseInt(document.getElementById('nt-max').value)||32,
     inscrits:0,
     prix:parseInt(document.getElementById('nt-prix').value)||5000,
@@ -1517,12 +1579,14 @@ function addTournament(){
 }
 
 function saveTournament(idx){
-  DB.tournaments[idx].name=document.getElementById('nt-nm').value;
-  DB.tournaments[idx].club=document.getElementById('nt-club').value;
-  DB.tournaments[idx].date=document.getElementById('nt-date').value;
-  DB.tournaments[idx].max=parseInt(document.getElementById('nt-max').value)||32;
-  DB.tournaments[idx].prix=parseInt(document.getElementById('nt-prix').value)||5000;
-  DB.tournaments[idx].type=document.getElementById('nt-type').value;
+  var t=DB.tournaments[idx];
+  var d=document.getElementById('nt-date').value||t.startDate;
+  t.name=document.getElementById('nt-nm').value;
+  t.club=document.getElementById('nt-club').value;
+  t.startDate=d;t.endDate=d;
+  t.max=parseInt(document.getElementById('nt-max').value)||32;
+  t.prix=parseInt(document.getElementById('nt-prix').value)||5000;
+  t.type=document.getElementById('nt-type').value;
   closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('✅ Tournoi mis à jour !');
 }
 
@@ -1593,6 +1657,7 @@ function cpInit(){
   }
   // Populate club selector with active clubs only
   var sel = document.getElementById('cp-club-select');
+  if(!sel || typeof sel.value === 'undefined') return;
   var prevVal = sel.value;
   sel.innerHTML = '';
   for(var i=0;i<DB.clubs.length;i++){
@@ -1754,7 +1819,7 @@ function cpRenderResa(){
 
     card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start">'+
       '<div>'+
-        '<div style="font-size:12px;font-weight:700;color:#fff">'+court.name+'</div>'+
+        '<div style="font-size:12px;font-weight:700;color:#fff">'+esc(court.name)+'</div>'+
         '<div style="font-size:11px;color:#4CD68A;margin-top:2px">'+tStr(r.sm)+' → '+tStr(r.em)+'</div>'+
         '<div style="font-size:10px;color:#667;margin-top:1px">'+fmtDK(r.dk)+'</div>'+
         '<div style="font-size:10px;color:#aaa;margin-top:2px">'+r.name+'</div>'+
@@ -1829,7 +1894,7 @@ function cpRenderBlocked(){
     var row = document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:7px;padding:7px;background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444';
     var info = document.createElement('div'); info.style.flex='1';
-    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+court.name+' · '+tStr(b.sm)+'</div>'+
+    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(court.name)+' · '+tStr(b.sm)+'</div>'+
       '<div style="font-size:10px;color:#4CD68A;margin-top:1px">'+fmtDK(b.dk)+'</div>'+
       '<div style="font-size:10px;color:#aaa">📞 '+b.name+'</div>';
     var unblockBtn = document.createElement('button');
@@ -1869,8 +1934,8 @@ function cpRenderCourts(){
       var row = document.createElement('div');
       row.style.cssText='display:flex;align-items:center;gap:7px;padding:8px;background:#0F1520;border-radius:8px;margin-bottom:5px;border:1px solid #2A3444';
       var info = document.createElement('div'); info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div>'+
-        '<div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(ct.name)+'</div>'+
+        '<div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+esc(ct.type)+'</div>';
       var badge = document.createElement('span');
       badge.className='aobadge '+(ct.open?'aob-g':'aob-r');
       badge.textContent = ct.open?'✓ Ouvert':'✗ Fermé';
@@ -1938,7 +2003,7 @@ function renderAdminCoaches(){
       av.textContent = coach.init;
 
       var info = document.createElement('div'); info.style.flex='1';
-      info.innerHTML = '<div style="font-size:12px;font-weight:700;color:#fff">'+coach.n+'</div>'+
+      info.innerHTML = '<div style="font-size:12px;font-weight:700;color:#fff">'+esc(coach.n)+'</div>'+
         '<div style="font-size:10px;color:#4CD68A;margin-top:1px">'+coach.price+'</div>'+
         '<div style="font-size:10px;color:#445;margin-top:1px">📍 '+coach.court+' · '+coach.level+'</div>'+
         '<div style="font-size:10px;color:#445">🕐 '+coach.slots.join(' · ')+'</div>';
@@ -1957,7 +2022,7 @@ function renderAdminCoaches(){
           var cf = row.querySelector('.iconfirm');
           if(cf){ cf.remove(); return; }
           var cfRow = document.createElement('div'); cfRow.className='iconfirm';
-          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Retirer '+DB.clubs[ci3].coaches[cj3].n+' ?</span>';
+          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Retirer '+esc(DB.clubs[ci3].coaches[cj3].n)+' ?</span>';
           var yes = document.createElement('button');
           yes.style.cssText='font-size:11px;padding:3px 8px;border-radius:5px;background:#791F1F;color:#fff;border:none;cursor:pointer;font-weight:700;margin-left:6px';
           yes.textContent='✓ Oui';
@@ -2003,9 +2068,9 @@ function renderAdminTournaments(){
       var pct=Math.round((t.inscrits/t.max)*100);
       var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px';
       top.innerHTML='<div>'+
-        '<div style="font-size:12px;font-weight:700;color:#fff">'+t.name+'</div>'+
-        '<div style="font-size:10px;color:#445;margin-top:2px">'+t.club+' · '+t.date+'</div>'+
-        '<div style="font-size:10px;color:#445;margin-top:1px">'+t.inscrits+'/'+t.max+' inscrits · '+t.prix.toLocaleString()+' XAF</div>'+
+        '<div style="font-size:12px;font-weight:700;color:#fff">'+esc(t.name)+'</div>'+
+        '<div style="font-size:10px;color:#445;margin-top:2px">'+esc(t.club)+' · '+fmtTDate(t)+'</div>'+
+        '<div style="font-size:10px;color:#445;margin-top:1px">'+t.inscrits+'/'+t.max+' inscrits · '+fmtXAF(t.prix)+'</div>'+
         '<div style="height:4px;background:#1a2a3a;border-radius:2px;margin-top:5px;overflow:hidden;width:140px">'+
           '<div style="height:100%;width:'+pct+'%;background:#1A7A4A;border-radius:2px"></div></div>'+
       '</div><span class="aobadge '+sc+'">'+sl+'</span>';
@@ -2048,10 +2113,10 @@ function renderPlayerTournaments(){
     var sl=t.status==='open'?'Ouvert':t.status==='full'?'Complet':'Bientot';
     var pct=Math.round((t.inscrits/t.max)*100);
     var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start';
-    top.innerHTML='<div><div class="cn">'+t.name+'</div><div class="cs">'+t.club+' · '+t.date+'</div></div><span class="bdg '+sc+'">'+sl+'</span>';
+    top.innerHTML='<div><div class="cn">'+esc(t.name)+'</div><div class="cs">'+esc(t.club)+' · '+fmtTDate(t)+'</div></div><span class="bdg '+sc+'">'+sl+'</span>';
     card.appendChild(top);
     var tags=document.createElement('div');tags.style='display:flex;gap:4px;margin-top:5px;flex-wrap:wrap';
-    tags.innerHTML='<span class="bdg bb">'+t.max+' joueurs</span><span class="bdg ba">'+t.prix.toLocaleString()+' XAF</span><span class="bdg bg">'+t.type+'</span>';
+    tags.innerHTML='<span class="bdg bb">'+t.max+' joueurs</span><span class="bdg ba">'+fmtXAF(t.prix)+'</span><span class="bdg bg">'+esc(t.type)+'</span>';
     card.appendChild(tags);
     var prog=document.createElement('div');prog.className='tprog';
     var fill=document.createElement('div');fill.className='tfill';fill.style.width=pct+'%';if(t.status==='full')fill.style.background='#A32D2D';
@@ -2060,7 +2125,7 @@ function renderPlayerTournaments(){
     card.appendChild(sub);
     if(t.status!=='full'){
       var btn=document.createElement('button');btn.className='btn btnb';btn.style.marginTop='7px';
-      btn.textContent="S'inscrire - "+t.prix.toLocaleString()+' XAF';
+      btn.textContent="S'inscrire - "+fmtXAF(t.prix)+'';
       btn.onclick=function(){gP('p-trn-ok');};
       card.appendChild(btn);
     }
@@ -2068,29 +2133,6 @@ function renderPlayerTournaments(){
   });
 }
 
-function addTournament(){
-  var nm=document.getElementById('nt-nm').value.trim();
-  if(!nm){showMsg('Remplis le nom !');return;}
-  DB.tournaments.push({
-    name:nm,club:document.getElementById('nt-club').value||'Padel Arena',
-    date:document.getElementById('nt-date').value||'A definir',
-    max:parseInt(document.getElementById('nt-max').value)||32,
-    inscrits:0,prix:parseInt(document.getElementById('nt-prix').value)||5000,
-    type:document.getElementById('nt-type').value||'Mixte',status:'soon'
-  });
-  closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('Tournoi cree !');
-}
-
-function saveTournament(idx){
-  var t=DB.tournaments[idx];
-  t.name=document.getElementById('nt-nm').value;
-  t.club=document.getElementById('nt-club').value;
-  t.date=document.getElementById('nt-date').value;
-  t.max=parseInt(document.getElementById('nt-max').value)||32;
-  t.prix=parseInt(document.getElementById('nt-prix').value)||5000;
-  t.type=document.getElementById('nt-type').value;
-  closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('Tournoi mis a jour !');
-}
 
 // ============================================================
 // CLUB PANEL NOTIFICATIONS
@@ -2150,7 +2192,7 @@ function acceptInvite(){
   c.style.background='#E1F5EE';
   c.style.borderColor='#5DCAA5';
   var acts=document.getElementById('inv-actions');
-  if(acts) acts.innerHTML='<span style="font-size:11px;color:#085041;font-weight:700">Accepte ! RDV mercredi 28 mai a 18h00</span>';
+  if(acts) acts.innerHTML='<span style="font-size:11px;color:#085041;font-weight:700">Invitation acceptée</span>';
 }
 
 function declineInvite(){
@@ -2159,13 +2201,12 @@ function declineInvite(){
   c.style.opacity='0.5';
   c.style.background='#f9f9f9';
   var acts=document.getElementById('inv-actions');
-  if(acts) acts.innerHTML='<span style="font-size:11px;color:#888">Invitation declinee</span>';
+  if(acts) acts.innerHTML='<span style="font-size:11px;color:#888">Invitation déclinée</span>';
 }
 
 function acceptNotifInvite(){
   var acts=document.getElementById('notif-inv-actions');
-  if(acts) acts.innerHTML='<span style="font-size:11px;color:#085041;font-weight:700">Accepte ! RDV mercredi 28 mai a 18h00</span>';
-  // Also update the inv-card in players page
+  if(acts) acts.innerHTML='<span style="font-size:11px;color:#085041;font-weight:700">Invitation acceptée</span>';
   acceptInvite();
 }
 
@@ -2338,20 +2379,88 @@ function applyLang(){
 }
 
 // ============================================================
+// SUPABASE INIT — charge les vraies données
+// ============================================================
+async function initSupabase(){
+  try{
+    // 1. Charger les clubs + coaches depuis Supabase
+    var sbClubs=await sbLoadClubs();
+    var sbCoaches=await sbLoadCoachesWithClubs();
+    if(sbClubs && sbClubs.length>0){
+      DB.clubs=sbClubsToLocalDB(sbClubs, sbCoaches);
+      sbLoaded=true;
+    }
+    // 2. Charger les réservations existantes
+    var resas=await sbLoadReservations();
+    resas.forEach(function(r){
+      var ci=DB.clubs.findIndex(function(c){return c._id===r.club_id;});
+      if(ci<0) return;
+      if(!DB.clubs[ci].courts) return;
+      var coi=DB.clubs[ci].courts.findIndex(function(ct){return ct._id===r.court_id;});
+      if(coi<0) return;
+      var dur=r.end_minutes-r.start_minutes;
+      var ns=dur/30;
+      for(var s=0;s<ns;s++){
+        var k=rk(ci,coi,r.date_key,r.start_minutes+(s*30));
+        DB.reservations[k]=true;
+        DB.reservationIds[k]=r.id;
+      }
+    });
+    // 3. Charger les tournois
+    var tours=await sbLoadTournaments();
+    if(tours && tours.length>0){
+      DB.tournaments=tours.map(function(t){
+        return{_id:t.id,name:t.name,club:t.clubs?t.clubs.name:'',
+          startDate:t.start_date,endDate:t.end_date||t.start_date,
+          max:t.max_players,inscrits:t.registered_count,prix:t.entry_fee,
+          type:t.type,status:t.status,
+          paymentPhone:t.payment_phone,paymentProvider:t.payment_provider};
+      });
+    }
+    // 4. Re-render avec les vraies données
+    renderHomeClubs();
+    renderPlayerTournaments();
+    buildCoachClubSelector();
+    // 5. Cacher la bannière DEMO si données réelles chargées
+    if(sbLoaded){
+      var banner=document.querySelector('[style*="B71C1C"]');
+      if(banner){banner.textContent='✅ Application connectée — données réelles';banner.style.background='#1A7A4A';}
+    }
+    // 6. Écouter les nouvelles réservations en temps réel
+    if(sbLoaded && DB.clubs[0] && DB.clubs[0]._id){
+      sbWatchReservations(DB.clubs[0]._id, function(payload){
+        var r=payload.new;
+        var ci=DB.clubs.findIndex(function(c){return c._id===r.club_id;});
+        var coi=(ci>=0&&DB.clubs[ci].courts)?DB.clubs[ci].courts.findIndex(function(ct){return ct._id===r.court_id;}):-1;
+        if(ci>=0 && coi>=0){
+          var dur=r.end_minutes-r.start_minutes; var ns=dur/30;
+          for(var s=0;s<ns;s++) DB.reservations[rk(ci,coi,r.date_key,r.start_minutes+(s*30))]=true;
+          buildSlots();
+        }
+      });
+    }
+  }catch(e){
+    console.log('initSupabase error:',e.message);
+    // Continue avec les données démo
+  }
+}
+
+// ============================================================
 // INIT
 // ============================================================
-renderHomeClubs();
-cpInit();
-buildCoachClubSelector();
-renderAdminTournaments();
-renderPlayerTournaments();
+try{renderHomeClubs();}catch(e){console.log('renderHomeClubs:',e.message);}
+try{cpInit();}catch(e){console.log('cpInit:',e.message);}
+try{buildCoachClubSelector();}catch(e){console.log('buildCoachClubSelector:',e.message);}
+try{renderAdminTournaments();}catch(e){console.log('renderAdminTournaments:',e.message);}
+try{renderPlayerTournaments();}catch(e){console.log('renderPlayerTournaments:',e.message);}
+// Connexion Supabase — charge les vraies données
+initSupabase();
 </script>
 <script>
 // Register Service Worker for PWA
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('./sw.js').then(function(reg){
-      console.log('PadelGabon PWA ready!');
     }).catch(function(err){
       console.log('SW error:', err);
     });
@@ -2362,7 +2471,6 @@ if('serviceWorker' in navigator){
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('./sw.js').then(function(reg){
-      console.log('PadelGabon PWA ready!');
     }).catch(function(err){
       console.log('SW error:', err);
     });

@@ -1,6 +1,9 @@
 const CACHE_NAME = 'padelgabon-v1';
 const FILES_TO_CACHE = [
-  './PadelGabon.html',
+  './',
+  './index.html',
+  './admin.html',
+  './club.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png'

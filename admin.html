@@ -2,10 +2,17 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PadelGabon — Super Admin</title>
+<link rel="manifest" href="./manifest.json">
+<!-- Config locale (gitignored) -->
+<script src="./config.js"></script>
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./supabase-client.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+button:focus-visible,.sl:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid #1A7A4A;outline-offset:2px}
 body{font-family:system-ui,sans-serif;background:#0a0a0a;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:16px 8px;gap:16px}
 .albl{color:#444;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;text-align:center}
 .dual{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;width:100%;max-width:760px}
@@ -171,6 +178,8 @@ body { justify-content: center; padding: 16px 8px; min-height: 100vh; }
 </style>
 </head>
 <body style="background:#0a0a0a">
+<div style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#B71C1C;color:#fff;font-size:11px;font-weight:700;text-align:center;padding:5px 8px;letter-spacing:.5px">⚠️ MODE DÉMO — Ne saisissez pas de données réelles. Aucune donnée n'est sauvegardée.</div>
+<div style="height:28px"></div>
 <div id="msg-toast" class="mtoast"></div>
 
 <!-- ADMIN LOGIN GATE -->
@@ -442,14 +451,17 @@ var DB={
   ],
   reservations:{},
   tournaments:[
-    {name:'Open de Libreville 2026',club:'Padel Arena',date:'14-15 juin',max:32,inscrits:20,prix:5000,type:'Mixte',status:'open'},
-    {name:'Championnat Gabon Padel',club:'Club Omnisports',date:'5-6 juillet',max:32,inscrits:8,prix:15000,type:'Doubles',status:'soon'},
-    {name:'Akanda Summer Cup',club:'SportPark Akanda',date:'20 juillet',max:24,inscrits:24,prix:3000,type:'Simple',status:'full'}
+    {name:'Open de Libreville 2026',club:'Padel Arena',startDate:'2026-06-14',endDate:'2026-06-15',max:32,inscrits:20,prix:5000,type:'Mixte',status:'open'},
+    {name:'Championnat Gabon Padel',club:'Club Omnisports',startDate:'2026-07-05',endDate:'2026-07-06',max:32,inscrits:8,prix:15000,type:'Doubles',status:'soon'},
+    {name:'Akanda Summer Cup',club:'SportPark Akanda',startDate:'2026-07-20',endDate:'2026-07-20',max:24,inscrits:24,prix:3000,type:'Simple',status:'full'}
   ]
 };
 
 // STATE
 var curCI=0,curCourtI=0,curDur=0,curMachine=false,curExtras=[],curDateKey='',lvlFilter='Tous';
+var sbLoaded=false;
+DB.reservationIds={};
+DB.currentPlayer={name:'Admin',phone:''};
 
 // HELPERS
 function padZ(n){return n<10?'0'+n:String(n);}
@@ -463,6 +475,16 @@ function fmtDK(dk){
   var mn=['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
   return dn[d.getDay()]+' '+d.getDate()+' '+mn[d.getMonth()];
 }
+function fmtTDate(t){
+  var mn=['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
+  var d1=new Date(t.startDate);
+  var d2=t.endDate&&t.endDate!==t.startDate?new Date(t.endDate):null;
+  var m=mn[d1.getMonth()];
+  return d2?d1.getDate()+'-'+d2.getDate()+' '+m:d1.getDate()+' '+m;
+}
+function fmtXAF(n){return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' XAF';}
+function fmtN(n){return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g,' ');}
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function rk(ci,coi,dk,t){return ci+'-'+coi+'-'+dk+'-'+t;}
 function isBooked(ci,coi,dk,sM,eM){
   // Check every 30-min block in the requested range
@@ -498,7 +520,7 @@ function renderHomeClubs(){
       var c=DB.clubs[idx];
       var open=c.courts.filter(function(x){return x.open;}).length;
       var card=document.createElement('div');card.className='card';
-      card.innerHTML='<div class="cn">'+c.name+'</div>'+
+      card.innerHTML='<div class="cn">'+esc(c.name)+'</div>'+
         '<div class="cs">📍 '+c.loc+' · '+c.courts.length+' courts · Ouvert '+c.openFrom+'h-'+c.openTo+'h</div>'+
         '<div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap">'+
           '<span class="bdg bg">'+open+' courts ouverts</span>'+
@@ -516,13 +538,13 @@ function loadClub(){
   var cl=DB.clubs[curCI];
   document.getElementById('club-title').textContent=cl.name;
   document.getElementById('club-hours-sub').textContent='Ouvert '+cl.openFrom+'h00 - '+cl.openTo+'h00';
-  document.getElementById('dp60').textContent=cl.prices[60].toLocaleString()+' XAF';
-  document.getElementById('dp90').textContent=cl.prices[90].toLocaleString()+' XAF';
-  document.getElementById('dp120').textContent=cl.prices[120].toLocaleString()+' XAF';
+  document.getElementById('dp60').textContent=fmtXAF(cl.prices[60])+'';
+  document.getElementById('dp90').textContent=fmtXAF(cl.prices[90])+'';
+  document.getElementById('dp120').textContent=fmtXAF(cl.prices[120])+'';
   document.getElementById('cf-club').textContent=cl.name;
   if(cl.hasMachine){
     document.getElementById('machine-sec').style.display='block';
-    document.getElementById('mach-price').textContent=cl.machinePrice.toLocaleString()+' XAF';
+    document.getElementById('mach-price').textContent=fmtXAF(cl.machinePrice)+'';
     document.getElementById('mach-balls').textContent=cl.machineBalls;
     var cb=document.getElementById('mach-cb');cb.classList.remove('on');cb.textContent='';curMachine=false;
   }else document.getElementById('machine-sec').style.display='none';
@@ -637,6 +659,9 @@ function buildSlots(){
   var noMsg=document.getElementById('no-slots-msg');
   var count=0;
   document.getElementById('court-lbl-info').textContent=court.name+' · '+fmtDK(curDateKey);
+  var now=new Date();
+  var todayKey=mkDK(now);
+  var nowM=now.getHours()*60+now.getMinutes();
   // Loop from opening hour to closing hour, every 30 min
   for(var h=from;h<to;h++){
     for(var mn=0;mn<60;mn+=30){
@@ -644,6 +669,8 @@ function buildSlots(){
       var eM=sM+curDur;
       // Session must END by closing time
       if(eM>to*60)continue;
+      // Don't show past slots for today
+      if(curDateKey===todayKey&&sM<=nowM)continue;
       count++;
       var div=document.createElement('div');
       div.className='sl';
@@ -651,8 +678,11 @@ function buildSlots(){
       var taken=!court.open||isBooked(curCI,curCourtI,curDateKey,sM,eM);
       if(taken){
         div.classList.add('taken');
+        div.setAttribute('aria-label','Réservé — '+tStr(sM));
+        div.textContent=tStr(sM)+' ✕';
       }else{
         div.classList.add('free');
+        div.setAttribute('aria-label','Disponible — '+tStr(sM));
         (function(sStart,sEnd,slDiv){
           slDiv.onclick=function(){
             var picked=document.querySelectorAll('.sl.picked');
@@ -684,7 +714,7 @@ function showConfirm(sM,eM){
     row.style.borderBottom=i===cl.extras.length-1?'none':'1px solid #f0f0f0';
     var cb=document.createElement('div');cb.className='excb';cb.id='ecb'+i;
     var nm=document.createElement('span');nm.style.cssText='font-size:12px;flex:1;color:#111';nm.textContent=cl.extras[i].n;
-    var pr=document.createElement('span');pr.style.cssText='font-size:12px;font-weight:700;color:#1A7A4A';pr.textContent=cl.extras[i].p.toLocaleString()+' XAF';
+    var pr=document.createElement('span');pr.style.cssText='font-size:12px;font-weight:700;color:#1A7A4A';pr.textContent=fmtXAF(cl.extras[i].p)+'';
     row.appendChild(cb);row.appendChild(nm);row.appendChild(pr);
     (function(idx){row.onclick=function(){toggleExt(idx);};})(i);
     el2.appendChild(row);
@@ -715,8 +745,6 @@ function confirmResa(){
   document.getElementById('s-code').textContent=rCode();
   addToHistory(cl.name,court.name+' · '+court.type,fmtDK(curDateKey),tStr(sM),tStr(eM),curCI,curCourtI,curDateKey,sM,eM);
   if(typeof addClubNotif==='function') addClubNotif(curCI,court.name,fmtDK(curDateKey),tStr(sM),tStr(eM));
-  // Notify club panel if this club is connected
-  addClubNotif(curCI, court.name, fmtDK(curDateKey), tStr(sM), tStr(eM));
   buildSlots();
   document.getElementById('conf-box').style.display='none';
   gP('p-resa-ok');
@@ -793,7 +821,7 @@ function toggleMachine(){
   var cb=document.getElementById('mach-cb');
   if(curMachine){cb.classList.add('on');cb.textContent='✓';}else{cb.classList.remove('on');cb.textContent='';}
   var row=document.getElementById('cf-mach'),cl=DB.clubs[curCI];
-  if(curMachine&&cl.hasMachine){row.style.display='flex';document.getElementById('cf-mach-v').textContent=cl.machinePrice.toLocaleString()+' XAF ('+cl.machineBalls+')';}
+  if(curMachine&&cl.hasMachine){row.style.display='flex';document.getElementById('cf-mach-v').textContent=fmtXAF(cl.machinePrice)+' ('+cl.machineBalls+')';}
   else row.style.display='none';
   var c=document.getElementById('conf-box');updateTotal(parseInt(c.dataset.sm),parseInt(c.dataset.em));
 }
@@ -803,12 +831,12 @@ function updateTotal(sM,eM){
   var total=cl.prices[curDur]||0;
   for(var i=0;i<cl.extras.length;i++)if(curExtras[i])total+=cl.extras[i].p;
   if(curMachine&&cl.hasMachine)total+=cl.machinePrice;
-  document.getElementById('cf-total').textContent=total.toLocaleString()+' XAF';
+  document.getElementById('cf-total').textContent=fmtXAF(total)+'';
   var er=document.getElementById('cf-extras');er.innerHTML='';
   for(var i=0;i<cl.extras.length;i++){
     if(curExtras[i]){
       var row=document.createElement('div');row.className='cr';
-      row.innerHTML='<span class="cl2">'+cl.extras[i].n+'</span><span class="cv">'+cl.extras[i].p.toLocaleString()+' XAF</span>';
+      row.innerHTML='<span class="cl2">'+esc(cl.extras[i].n)+'</span><span class="cv">'+fmtXAF(cl.extras[i].p)+'</span>';
       er.appendChild(row);
     }
   }
@@ -825,9 +853,9 @@ function renderCoaches(){
       var d=document.createElement('div');d.className='coch';
       var av=document.createElement('div');av.style.cssText='width:36px;height:36px;border-radius:50%;background:'+c.bg+';color:'+c.tc+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0';av.textContent=c.init;
       var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+c.n+'</div><div style="font-size:10px;color:#666;margin-top:2px">'+c.court+' · '+c.level+'<br>'+c.price+' · '+c.slots.join(' · ')+'</div>';
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+esc(c.n)+'</div><div style="font-size:10px;color:#666;margin-top:2px">'+esc(c.court)+' · '+esc(c.level)+'<br>'+esc(c.price)+' · '+esc(c.slots.join(' \xb7 '))+'</div>';
       var btn=document.createElement('button');btn.style.cssText='font-size:11px;padding:4px 8px;border-radius:7px;border:1px solid #1A3A8A;color:#1A3A8A;background:#E6F1FB;cursor:pointer';btn.textContent='Réserver';
-      btn.onclick=function(){document.getElementById('s-coach-d').textContent='Coach : '+c.n+'\n'+c.court+' · '+c.slots[0]+'\n'+DB.clubs[curCI].name;gP('p-coach-ok');};
+      btn.onclick=function(){document.getElementById('s-coach-d').textContent='Coach : '+esc(c.n)+'\n'+esc(c.court)+' · '+c.slots[0]+'\n'+DB.clubs[curCI].name;gP('p-coach-ok');};
       d.appendChild(av);d.appendChild(info);d.appendChild(btn);list.appendChild(d);
     })(cl.coaches[i]);
   }
@@ -845,7 +873,7 @@ function renderPlayers(list){
     // Avatar + info
     var av=document.createElement('div');av.style.cssText='width:34px;height:34px;border-radius:50%;background:'+p.bg+';color:'+p.tc+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0';av.textContent=p.i;
     var info=document.createElement('div');info.style.flex='1';
-    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+p.n+'</div>'+
+    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+esc(p.n)+'</div>'+
       '<div style="margin-top:2px"><span style="font-size:9px;padding:1px 5px;border-radius:4px;background:'+lbg+';color:'+ltc+';font-weight:600">'+p.lv+'</span> <span style="font-size:10px;color:#aaa">'+p.g+' matchs</span></div>';
     // Invite button - use closure to capture player name
     var btn=document.createElement('button');
@@ -868,8 +896,8 @@ function renderShop(){
     var img=document.createElement('div');img.style.cssText='height:54px;border-radius:8px;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:5px;overflow:hidden';
     if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:100%;object-fit:cover';img.appendChild(im);}else img.textContent=p.em;
     card.appendChild(img);
-    card.innerHTML+='<div style="font-size:11px;font-weight:700;color:#111">'+p.n+'</div><div style="font-size:10px;color:#666">'+p.b+'</div>'+
-      '<div style="font-size:12px;font-weight:700;color:#1A7A4A;margin-top:3px">'+p.p.toLocaleString()+' <span style="font-size:9px;color:#aaa;text-decoration:line-through">'+p.o.toLocaleString()+'</span></div>'+
+    card.innerHTML+='<div style="font-size:11px;font-weight:700;color:#111">'+esc(p.n)+'</div><div style="font-size:10px;color:#666">'+esc(p.b)+'</div>'+
+      '<div style="font-size:12px;font-weight:700;color:#1A7A4A;margin-top:3px">'+fmtN(p.p)+' <span style="font-size:9px;color:#aaa;text-decoration:line-through">'+fmtN(p.o)+'</span></div>'+
       '<div style="font-size:9px;background:#FCEBEB;color:#791F1F;border-radius:3px;padding:1px 5px;display:inline-block;margin-top:2px">-'+Math.round((1-p.p/p.o)*100)+'%</div>';
     g.appendChild(card);
   }
@@ -915,24 +943,24 @@ function renderAdminClubs(){
       if(c.suspended){
         sc++;
         main.innerHTML='<div class="cdot" style="background:#E24B4A"></div>'+
-          '<div class="cinfo"><div class="cname-a">'+c.name+'</div><div class="cmeta" style="color:#F09595">'+c.suspendedReason+'</div></div>';
+          '<div class="cinfo"><div class="cname-a">'+esc(c.name)+'</div><div class="cmeta" style="color:#F09595">'+c.suspendedReason+'</div></div>';
         var acts=document.createElement('div');acts.style='display:flex;gap:4px';
         var re=document.createElement('button');re.className='be';re.textContent='✓ Réactiver';
         re.style.cssText='background:#E1F5EE;color:#085041;border:none;border-radius:5px;padding:3px 7px;font-size:10px;font-weight:600;cursor:pointer';
-        re.onclick=function(){DB.clubs[idx].suspended=false;DB.clubs[idx].suspendedReason='';renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();showMsg('✅ Réactivé !');};
+        re.onclick=function(){DB.clubs[idx].suspended=false;DB.clubs[idx].suspendedReason='';if(sbLoaded&&DB.clubs[idx]._id)sbUnsuspendClub(DB.clubs[idx]._id).catch(function(e){});renderAdminClubs();renderHomeClubs();buildCourtSelector();try{cpInit();}catch(e){};showMsg('✅ Réactivé !');};
         var dl=document.createElement('button');dl.className='bd';dl.textContent='🗑 Suppr.';
-        dl.onclick=function(){showIC(row,'Supprimer '+c.name+' ?',function(){DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
+        dl.onclick=function(){showIC(row,'Supprimer '+esc(c.name)+' ?',function(){if(sbLoaded&&DB.clubs[idx]&&DB.clubs[idx]._id)sbDeleteClub(DB.clubs[idx]._id).catch(function(e){});DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();try{cpInit();}catch(e){};if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
         acts.appendChild(re);acts.appendChild(dl);main.appendChild(acts);row.appendChild(main);SL.appendChild(row);
       }else{
         ac++;
         main.innerHTML='<div class="cdot" style="background:#1A7A4A"></div>'+
-          '<div class="cinfo"><div class="cname-a">'+c.name+'</div><div class="cmeta">'+c.loc+' · '+c.courts.length+' courts · '+c.openFrom+'h-'+c.openTo+'h</div></div>';
+          '<div class="cinfo"><div class="cname-a">'+esc(c.name)+'</div><div class="cmeta">'+c.loc+' · '+c.courts.length+' courts · '+c.openFrom+'h-'+c.openTo+'h</div></div>';
         var acts=document.createElement('div');acts.style='display:flex;gap:4px';
         var ge=document.createElement('button');ge.className='be';ge.textContent='Gérer';ge.onclick=function(){openEditClub(idx);};
         var sp=document.createElement('button');sp.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FAEEDA;color:#633806;border:none;cursor:pointer;font-weight:600';sp.textContent='⏸';
-        sp.onclick=function(){showIC(row,'Suspendre '+c.name+' ?',function(){DB.clubs[idx].suspended=true;DB.clubs[idx].suspendedReason='Suspendu manuellement';renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx){cpLogout();}showMsg('⚠️ Suspendu.');});};
+        sp.onclick=function(){showIC(row,'Suspendre '+esc(c.name)+' ?',function(){DB.clubs[idx].suspended=true;DB.clubs[idx].suspendedReason='Suspendu manuellement';if(sbLoaded&&DB.clubs[idx]._id)sbSuspendClub(DB.clubs[idx]._id,'Suspendu manuellement').catch(function(e){});renderAdminClubs();renderHomeClubs();buildCourtSelector();try{cpInit();}catch(e){};if(cpCI===idx){cpLogout();}showMsg('⚠️ Suspendu.');});};
         var dl=document.createElement('button');dl.className='bd';dl.textContent='✕';
-        dl.onclick=function(){showIC(row,'Supprimer '+c.name+' ?',function(){DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
+        dl.onclick=function(){showIC(row,'Supprimer '+esc(c.name)+' ?',function(){if(sbLoaded&&DB.clubs[idx]&&DB.clubs[idx]._id)sbDeleteClub(DB.clubs[idx]._id).catch(function(e){});DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();try{cpInit();}catch(e){};if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
         acts.appendChild(ge);acts.appendChild(sp);acts.appendChild(dl);main.appendChild(acts);row.appendChild(main);AL.appendChild(row);
       }
     })(i);
@@ -1034,7 +1062,7 @@ function renderEditCourts(ci){
       var row=document.createElement('div');row.style.cssText='background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444;overflow:hidden';
       var main=document.createElement('div');main.style.cssText='display:flex;align-items:center;gap:7px;padding:7px 8px';
       var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(ct.name)+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+esc(ct.type)+'</div>';
       var tog=document.createElement('div');tog.className='tog '+(ct.open?'on':'off');tog.style.marginRight='4px';
       (function(ci3,cj3,t){t.onclick=function(){DB.clubs[ci3].courts[cj3].open=!DB.clubs[ci3].courts[cj3].open;t.classList.toggle('on');t.classList.toggle('off');};})(ci2,cj,tog);
       var del=document.createElement('button');del.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FCEBEB;color:#791F1F;border:none;cursor:pointer;font-weight:700';del.textContent='🗑';
@@ -1042,7 +1070,7 @@ function renderEditCourts(ci){
         del.onclick=function(){
           var cf=row.querySelector('.iconfirm');if(cf){cf.remove();return;}
           var cfRow=document.createElement('div');cfRow.className='iconfirm';
-          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Supprimer '+DB.clubs[ci3].courts[cj3].name+' ?</span>';
+          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Supprimer '+esc(DB.clubs[ci3].courts[cj3].name)+' ?</span>';
           var yes=document.createElement('button');yes.style.cssText='font-size:11px;padding:3px 8px;border-radius:5px;background:#791F1F;color:#fff;border:none;cursor:pointer;font-weight:700;margin-left:6px';yes.textContent='✓ Oui';
           yes.onclick=function(){DB.clubs[ci3].courts.splice(cj3,1);renderEditCourts(ci3);renderAdminClubs();};
           var no=document.createElement('button');no.style.cssText='font-size:11px;padding:3px 7px;border-radius:5px;background:#2A3444;color:#aaa;border:none;cursor:pointer;margin-left:4px';no.textContent='Non';no.onclick=function(){cfRow.remove();};
@@ -1082,7 +1110,7 @@ function renderAdminCourts(){
       var ct=DB.clubs[ci2].courts[cj];
       var row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:7px;padding:7px 8px;background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444';
       var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(ct.name)+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+esc(ct.type)+'</div>';
       var badge=document.createElement('span');badge.className='aobadge '+(ct.open?'aob-g':'aob-r');badge.textContent=ct.open?'✓ Ouvert':'✗ Fermé';
       var tog=document.createElement('div');tog.className='tog '+(ct.open?'on':'off');tog.style.marginLeft='5px';
       (function(ci3,cj3,t,b){
@@ -1097,9 +1125,9 @@ function renderAdminCourts(){
   }
   document.getElementById('prices-list').innerHTML=
     '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">Ouverture</div><div class="revam">'+cl.openFrom+'h00 - '+cl.openTo+'h00</div></div>'+
-    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h</div><div class="revam">'+cl.prices[60].toLocaleString()+' XAF</div></div>'+
-    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h30</div><div class="revam">'+cl.prices[90].toLocaleString()+' XAF</div></div>'+
-    '<div class="revrow" style="border:none"><div style="flex:1;font-size:12px;color:#aaa">2h</div><div class="revam">'+cl.prices[120].toLocaleString()+' XAF</div></div>';
+    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h</div><div class="revam">'+fmtXAF(cl.prices[60])+'</div></div>'+
+    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h30</div><div class="revam">'+fmtXAF(cl.prices[90])+'</div></div>'+
+    '<div class="revrow" style="border:none"><div style="flex:1;font-size:12px;color:#aaa">2h</div><div class="revam">'+fmtXAF(cl.prices[120])+'</div></div>';
 }
 
 function renderAdminProducts(){
@@ -1111,7 +1139,7 @@ function renderAdminProducts(){
       var em=document.createElement('div');em.className='prodem';
       if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:100%;object-fit:cover';em.appendChild(im);}else em.textContent=p.em;
       var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:11px;font-weight:700;color:#fff">'+p.n+'</div><div style="font-size:10px;color:#4CD68A;margin-top:1px">'+p.p.toLocaleString()+' XAF</div>';
+      info.innerHTML='<div style="font-size:11px;font-weight:700;color:#fff">'+esc(p.n)+'</div><div style="font-size:10px;color:#4CD68A;margin-top:1px">'+fmtXAF(p.p)+'</div>';
       var acts=document.createElement('div');acts.style='display:flex;gap:4px';
       var eb=document.createElement('button');eb.className='be';eb.textContent='✏️';eb.onclick=function(){oForm('edit-product',idx);};
       var db=document.createElement('button');db.className='bd';db.textContent='✕';
@@ -1131,7 +1159,7 @@ function renderAdminPubs(){
       if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:60px;object-fit:cover;border-radius:6px;margin-bottom:6px';im.onerror=function(){this.style.display='none';};row.appendChild(im);}
       var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start';
       var tb=p.t==='Magasin'?'aob-a':'aob-g';
-      top.innerHTML='<div><div style="font-size:12px;font-weight:700;color:#fff">'+p.n+'</div><div style="font-size:10px;color:#445;margin-top:1px">'+p.cl+' · '+p.p.toLocaleString()+' XAF/mois</div></div><span class="aobadge '+tb+'">'+p.t+'</span>';
+      top.innerHTML='<div><div style="font-size:12px;font-weight:700;color:#fff">'+esc(p.n)+'</div><div style="font-size:10px;color:#445;margin-top:1px">'+esc(p.cl)+' · '+fmtXAF(p.p)+'/mois</div></div><span class="aobadge '+tb+'">'+esc(p.t)+'</span>';
       var stats=document.createElement('div');stats.style='display:flex;gap:8px;margin-top:5px;align-items:center';
       stats.innerHTML='<div style="font-size:10px;color:#aaa">👁 <span style="color:#4CD68A;font-weight:700">'+p.v+'</span></div><div style="font-size:10px;color:#aaa">🖱 <span style="color:#4CD68A;font-weight:700">'+p.ck+'</span></div>';
       var db=document.createElement('button');db.className='bd';db.style.marginLeft='auto';db.textContent='Retirer';
@@ -1149,9 +1177,9 @@ function renderRevUnpaid(){
     (function(idx){
       if(DB.clubs[idx].suspended){found=true;
         var row=document.createElement('div');row.className='clubrow';
-        row.innerHTML='<div class="cdot" style="background:#E24B4A"></div><div class="cinfo"><div class="cname-a">'+DB.clubs[idx].name+'</div><div class="cmeta" style="color:#F09595">'+DB.clubs[idx].suspendedReason+'</div></div>';
+        row.innerHTML='<div class="cdot" style="background:#E24B4A"></div><div class="cinfo"><div class="cname-a">'+esc(DB.clubs[idx].name)+'</div><div class="cmeta" style="color:#F09595">'+esc(DB.clubs[idx].suspendedReason)+'</div></div>';
         var re=document.createElement('button');re.className='be';re.textContent='✓ Réactiver';
-        re.onclick=function(){DB.clubs[idx].suspended=false;DB.clubs[idx].suspendedReason='';renderAdminClubs();renderRevUnpaid();renderHomeClubs();cpInit();showMsg('✅ Réactivé !');};
+        re.onclick=function(){DB.clubs[idx].suspended=false;DB.clubs[idx].suspendedReason='';renderAdminClubs();renderRevUnpaid();renderHomeClubs();try{cpInit();}catch(e){};showMsg('✅ Réactivé !');};
         row.appendChild(re);list.appendChild(row);
       }
     })(i);
@@ -1230,8 +1258,8 @@ function oForm(type,idx){
   }else if(type==='edit-product'){
     var p=DB.products[idx];
     h='<div class="aft">✏️ Modifier produit<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom</div><input class="afi" id="ep-nm" value="'+p.n+'">'+
-      '<div class="afl">Marque</div><input class="afi" id="ep-br" value="'+p.b+'">'+
+      '<div class="afl">Nom</div><input class="afi" id="ep-nm" value="'+esc(p.n)+'">'+
+      '<div class="afl">Marque</div><input class="afi" id="ep-br" value="'+esc(p.b)+'">'+
       '<div class="af2"><div><div class="afl">Prix</div><input class="afi" type="number" id="ep-p" value="'+p.p+'"></div>'+
         '<div><div class="afl">Ancien prix</div><input class="afi" type="number" id="ep-o" value="'+p.o+'"></div></div>'+
       '<div class="afl">Photo</div>'+
@@ -1257,8 +1285,8 @@ function oForm(type,idx){
   }else if(type==='edit-trn'){
     var t=DB.tournaments[idx];
     h='<div class="aft">✏️ Modifier tournoi<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom</div><input class="afi" id="nt-nm" value="'+t.name+'">'+
-      '<div class="afl">Club</div><input class="afi" id="nt-club" value="'+t.club+'">'+
+      '<div class="afl">Nom</div><input class="afi" id="nt-nm" value="'+esc(t.name)+'">'+
+      '<div class="afl">Club</div><input class="afi" id="nt-club" value="'+esc(t.club)+'">'+
       '<div class="afl">Date</div><input class="afi" id="nt-date" value="'+t.date+'">'+
       '<div class="af2">'+
         '<div><div class="afl">Max joueurs</div><input class="afi" type="number" id="nt-max" value="'+t.max+'"></div>'+
@@ -1274,7 +1302,7 @@ function oForm(type,idx){
     var ci=parseInt(document.getElementById('coach-club-sel').value);
     var cl=DB.clubs[ci];
     // Build court options
-    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+c.name+'">'+c.name+'</option>';}).join('');
+    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+esc(c.name)+'">'+esc(c.name)+'</option>';}).join('');
     h='<div class="aft">🎓 Ajouter un coach<button class="afc" onclick="closeForm()">✕</button></div>'+
       '<div style="font-size:11px;color:#4CD68A;margin-bottom:8px">'+cl.name+'</div>'+
       '<div class="afl">Nom complet</div><input class="afi" id="ac-name" placeholder="Ex: Marco Silva">'+
@@ -1289,10 +1317,10 @@ function oForm(type,idx){
   }else if(type==='edit-coach'){
     var ci=idx.ci, cj=idx.cj;
     var cl=DB.clubs[ci], coach=cl.coaches[cj];
-    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+c.name+'"'+(c.name===coach.court?' selected':'')+'>'+c.name+'</option>';}).join('');
+    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+esc(c.name)+'"'+(c.name===coach.court?' selected':'')+'>'+esc(c.name)+'</option>';}).join('');
     h='<div class="aft">✏️ Modifier coach<button class="afc" onclick="closeForm()">✕</button></div>'+
       '<div style="font-size:11px;color:#4CD68A;margin-bottom:8px">'+cl.name+'</div>'+
-      '<div class="afl">Nom complet</div><input class="afi" id="ac-name" value="'+coach.n+'">'+
+      '<div class="afl">Nom complet</div><input class="afi" id="ac-name" value="'+esc(coach.n)+'">'+
       '<div class="afl">Initiales</div><input class="afi" id="ac-init" value="'+coach.init+'" maxlength="2">'+
       '<div class="afl">Court assigné</div><select class="afi" id="ac-court">'+courtOpts+'</select>'+
       '<div class="afl">Niveau / Description</div><input class="afi" id="ac-level" value="'+coach.level+'">'+
@@ -1334,10 +1362,29 @@ function addClub(){
   if(fr>=to){showMsg('Fermeture doit être après ouverture !');return;}
   var ct=Math.max(1,parseInt(document.getElementById('nc-ct').value)||2);
   var courts=[];for(var i=0;i<ct;i++)courts.push({name:'Court '+(i+1),type:'Extérieur',open:true});
-  DB.clubs.push({name:nm,loc:document.getElementById('nc-loc').value||'Libreville',openFrom:fr,openTo:to,
+  var newClub={name:nm,loc:document.getElementById('nc-loc').value||'Libreville',openFrom:fr,openTo:to,
     prices:{60:parseInt(document.getElementById('nc-p60').value)||5000,90:parseInt(document.getElementById('nc-p90').value)||7000,120:parseInt(document.getElementById('nc-p120').value)||9000},
-    hasMachine:false,machinePrice:0,machineBalls:'',desc:'',extras:[{n:'Eau',p:500}],courts:courts,coaches:[]});
-  closeForm();renderAdminClubs();renderHomeClubs();cpInit();showMsg('✅ '+nm+' ajouté avec '+ct+' courts !');
+    hasMachine:false,machinePrice:0,machineBalls:'',desc:'',extras:[{n:'Eau',p:500}],courts:courts,coaches:[]};
+  // Sauvegarder dans Supabase
+  if(sbLoaded){
+    var sbClubData={
+      name:nm, location:document.getElementById('nc-loc').value||'Libreville',
+      open_from:fr, open_to:to,
+      price_60:parseInt(document.getElementById('nc-p60').value)||5000,
+      price_90:parseInt(document.getElementById('nc-p90').value)||7000,
+      price_120:parseInt(document.getElementById('nc-p120').value)||9000,
+      extras:[{n:'Eau',p:500}], is_active:true
+    };
+    sbAddClub(sbClubData).then(function(saved){
+      newClub._id=saved.id;
+      // Ajouter les courts dans Supabase
+      for(var i=0;i<courts.length;i++){
+        sbAddCourt({club_id:saved.id,name:courts[i].name,type:'Extérieur',is_open:true,sort_order:i+1});
+      }
+    }).catch(function(e){console.log('sbAddClub error:',e.message);});
+  }
+  DB.clubs.push(newClub);
+  closeForm();renderAdminClubs();renderHomeClubs();try{cpInit();}catch(e){}showMsg('✅ '+nm+' ajouté avec '+ct+' courts !');
 }
 function addCourt(ci){
   var nm=document.getElementById('ac-nm').value.trim();if(!nm){showMsg('Remplis le nom !');return;}
@@ -1375,10 +1422,11 @@ function saveProd(idx){
 function addTournament(){
   var nm=document.getElementById('nt-nm').value.trim();
   if(!nm){showMsg('Remplis le nom !');return;}
+  var d=document.getElementById('nt-date').value||new Date().toISOString().slice(0,10);
   DB.tournaments.push({
     name:nm,
     club:document.getElementById('nt-club').value||'Padel Arena',
-    date:document.getElementById('nt-date').value||'À définir',
+    startDate:d,endDate:d,
     max:parseInt(document.getElementById('nt-max').value)||32,
     inscrits:0,
     prix:parseInt(document.getElementById('nt-prix').value)||5000,
@@ -1389,12 +1437,14 @@ function addTournament(){
 }
 
 function saveTournament(idx){
-  DB.tournaments[idx].name=document.getElementById('nt-nm').value;
-  DB.tournaments[idx].club=document.getElementById('nt-club').value;
-  DB.tournaments[idx].date=document.getElementById('nt-date').value;
-  DB.tournaments[idx].max=parseInt(document.getElementById('nt-max').value)||32;
-  DB.tournaments[idx].prix=parseInt(document.getElementById('nt-prix').value)||5000;
-  DB.tournaments[idx].type=document.getElementById('nt-type').value;
+  var t=DB.tournaments[idx];
+  var d=document.getElementById('nt-date').value||t.startDate;
+  t.name=document.getElementById('nt-nm').value;
+  t.club=document.getElementById('nt-club').value;
+  t.startDate=d;t.endDate=d;
+  t.max=parseInt(document.getElementById('nt-max').value)||32;
+  t.prix=parseInt(document.getElementById('nt-prix').value)||5000;
+  t.type=document.getElementById('nt-type').value;
   closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('✅ Tournoi mis à jour !');
 }
 
@@ -1465,6 +1515,7 @@ function cpInit(){
   }
   // Populate club selector with active clubs only
   var sel = document.getElementById('cp-club-select');
+  if(!sel || typeof sel.value === 'undefined') return;
   var prevVal = sel.value;
   sel.innerHTML = '';
   for(var i=0;i<DB.clubs.length;i++){
@@ -1626,7 +1677,7 @@ function cpRenderResa(){
 
     card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start">'+
       '<div>'+
-        '<div style="font-size:12px;font-weight:700;color:#fff">'+court.name+'</div>'+
+        '<div style="font-size:12px;font-weight:700;color:#fff">'+esc(court.name)+'</div>'+
         '<div style="font-size:11px;color:#4CD68A;margin-top:2px">'+tStr(r.sm)+' → '+tStr(r.em)+'</div>'+
         '<div style="font-size:10px;color:#667;margin-top:1px">'+fmtDK(r.dk)+'</div>'+
         '<div style="font-size:10px;color:#aaa;margin-top:2px">'+r.name+'</div>'+
@@ -1701,7 +1752,7 @@ function cpRenderBlocked(){
     var row = document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:7px;padding:7px;background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444';
     var info = document.createElement('div'); info.style.flex='1';
-    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+court.name+' · '+tStr(b.sm)+'</div>'+
+    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(court.name)+' · '+tStr(b.sm)+'</div>'+
       '<div style="font-size:10px;color:#4CD68A;margin-top:1px">'+fmtDK(b.dk)+'</div>'+
       '<div style="font-size:10px;color:#aaa">📞 '+b.name+'</div>';
     var unblockBtn = document.createElement('button');
@@ -1741,8 +1792,8 @@ function cpRenderCourts(){
       var row = document.createElement('div');
       row.style.cssText='display:flex;align-items:center;gap:7px;padding:8px;background:#0F1520;border-radius:8px;margin-bottom:5px;border:1px solid #2A3444';
       var info = document.createElement('div'); info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div>'+
-        '<div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(ct.name)+'</div>'+
+        '<div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+esc(ct.type)+'</div>';
       var badge = document.createElement('span');
       badge.className='aobadge '+(ct.open?'aob-g':'aob-r');
       badge.textContent = ct.open?'✓ Ouvert':'✗ Fermé';
@@ -1810,7 +1861,7 @@ function renderAdminCoaches(){
       av.textContent = coach.init;
 
       var info = document.createElement('div'); info.style.flex='1';
-      info.innerHTML = '<div style="font-size:12px;font-weight:700;color:#fff">'+coach.n+'</div>'+
+      info.innerHTML = '<div style="font-size:12px;font-weight:700;color:#fff">'+esc(coach.n)+'</div>'+
         '<div style="font-size:10px;color:#4CD68A;margin-top:1px">'+coach.price+'</div>'+
         '<div style="font-size:10px;color:#445;margin-top:1px">📍 '+coach.court+' · '+coach.level+'</div>'+
         '<div style="font-size:10px;color:#445">🕐 '+coach.slots.join(' · ')+'</div>';
@@ -1829,7 +1880,7 @@ function renderAdminCoaches(){
           var cf = row.querySelector('.iconfirm');
           if(cf){ cf.remove(); return; }
           var cfRow = document.createElement('div'); cfRow.className='iconfirm';
-          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Retirer '+DB.clubs[ci3].coaches[cj3].n+' ?</span>';
+          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Retirer '+esc(DB.clubs[ci3].coaches[cj3].n)+' ?</span>';
           var yes = document.createElement('button');
           yes.style.cssText='font-size:11px;padding:3px 8px;border-radius:5px;background:#791F1F;color:#fff;border:none;cursor:pointer;font-weight:700;margin-left:6px';
           yes.textContent='✓ Oui';
@@ -1875,9 +1926,9 @@ function renderAdminTournaments(){
       var pct=Math.round((t.inscrits/t.max)*100);
       var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px';
       top.innerHTML='<div>'+
-        '<div style="font-size:12px;font-weight:700;color:#fff">'+t.name+'</div>'+
-        '<div style="font-size:10px;color:#445;margin-top:2px">'+t.club+' · '+t.date+'</div>'+
-        '<div style="font-size:10px;color:#445;margin-top:1px">'+t.inscrits+'/'+t.max+' inscrits · '+t.prix.toLocaleString()+' XAF</div>'+
+        '<div style="font-size:12px;font-weight:700;color:#fff">'+esc(t.name)+'</div>'+
+        '<div style="font-size:10px;color:#445;margin-top:2px">'+esc(t.club)+' · '+fmtTDate(t)+'</div>'+
+        '<div style="font-size:10px;color:#445;margin-top:1px">'+t.inscrits+'/'+t.max+' inscrits · '+fmtXAF(t.prix)+'</div>'+
         '<div style="height:4px;background:#1a2a3a;border-radius:2px;margin-top:5px;overflow:hidden;width:140px">'+
           '<div style="height:100%;width:'+pct+'%;background:#1A7A4A;border-radius:2px"></div></div>'+
       '</div><span class="aobadge '+sc+'">'+sl+'</span>';
@@ -1920,10 +1971,10 @@ function renderPlayerTournaments(){
     var sl=t.status==='open'?'Ouvert':t.status==='full'?'Complet':'Bientot';
     var pct=Math.round((t.inscrits/t.max)*100);
     var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start';
-    top.innerHTML='<div><div class="cn">'+t.name+'</div><div class="cs">'+t.club+' · '+t.date+'</div></div><span class="bdg '+sc+'">'+sl+'</span>';
+    top.innerHTML='<div><div class="cn">'+esc(t.name)+'</div><div class="cs">'+esc(t.club)+' · '+fmtTDate(t)+'</div></div><span class="bdg '+sc+'">'+sl+'</span>';
     card.appendChild(top);
     var tags=document.createElement('div');tags.style='display:flex;gap:4px;margin-top:5px;flex-wrap:wrap';
-    tags.innerHTML='<span class="bdg bb">'+t.max+' joueurs</span><span class="bdg ba">'+t.prix.toLocaleString()+' XAF</span><span class="bdg bg">'+t.type+'</span>';
+    tags.innerHTML='<span class="bdg bb">'+t.max+' joueurs</span><span class="bdg ba">'+fmtXAF(t.prix)+'</span><span class="bdg bg">'+esc(t.type)+'</span>';
     card.appendChild(tags);
     var prog=document.createElement('div');prog.className='tprog';
     var fill=document.createElement('div');fill.className='tfill';fill.style.width=pct+'%';if(t.status==='full')fill.style.background='#A32D2D';
@@ -1932,7 +1983,7 @@ function renderPlayerTournaments(){
     card.appendChild(sub);
     if(t.status!=='full'){
       var btn=document.createElement('button');btn.className='btn btnb';btn.style.marginTop='7px';
-      btn.textContent="S'inscrire - "+t.prix.toLocaleString()+' XAF';
+      btn.textContent="S'inscrire - "+fmtXAF(t.prix)+'';
       btn.onclick=function(){gP('p-trn-ok');};
       card.appendChild(btn);
     }
@@ -1940,29 +1991,6 @@ function renderPlayerTournaments(){
   });
 }
 
-function addTournament(){
-  var nm=document.getElementById('nt-nm').value.trim();
-  if(!nm){showMsg('Remplis le nom !');return;}
-  DB.tournaments.push({
-    name:nm,club:document.getElementById('nt-club').value||'Padel Arena',
-    date:document.getElementById('nt-date').value||'A definir',
-    max:parseInt(document.getElementById('nt-max').value)||32,
-    inscrits:0,prix:parseInt(document.getElementById('nt-prix').value)||5000,
-    type:document.getElementById('nt-type').value||'Mixte',status:'soon'
-  });
-  closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('Tournoi cree !');
-}
-
-function saveTournament(idx){
-  var t=DB.tournaments[idx];
-  t.name=document.getElementById('nt-nm').value;
-  t.club=document.getElementById('nt-club').value;
-  t.date=document.getElementById('nt-date').value;
-  t.max=parseInt(document.getElementById('nt-max').value)||32;
-  t.prix=parseInt(document.getElementById('nt-prix').value)||5000;
-  t.type=document.getElementById('nt-type').value;
-  closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('Tournoi mis a jour !');
-}
 
 // ============================================================
 // CLUB PANEL NOTIFICATIONS
@@ -2210,1878 +2238,65 @@ function applyLang(){
 }
 
 // ============================================================
-// INIT
 // ============================================================
-renderHomeClubs();
-cpInit();
-buildCoachClubSelector();
-renderAdminTournaments();
-renderPlayerTournaments();
-</script>
-<script>
-// Register Service Worker for PWA
-if('serviceWorker' in navigator){
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('./sw.js').then(function(reg){
-      console.log('PadelGabon PWA ready!');
-    }).catch(function(err){
-      console.log('SW error:', err);
+// SUPABASE INIT — admin
+// ============================================================
+async function initSupabase(){
+  try{
+    var sbClubs=await sbLoadClubs();
+    var sbCoaches=await sbLoadCoachesWithClubs();
+    if(sbClubs && sbClubs.length>0){
+      DB.clubs=sbClubsToLocalDB(sbClubs,sbCoaches);
+      sbLoaded=true;
+    }
+    var resas=await sbLoadReservations();
+    resas.forEach(function(r){
+      var ci=DB.clubs.findIndex(function(c){return c._id===r.club_id;});
+      if(ci<0||!DB.clubs[ci].courts) return;
+      var coi=DB.clubs[ci].courts.findIndex(function(ct){return ct._id===r.court_id;});
+      if(coi<0) return;
+      var ns=(r.end_minutes-r.start_minutes)/30;
+      for(var s=0;s<ns;s++){
+        var k=rk(ci,coi,r.date_key,r.start_minutes+(s*30));
+        DB.reservations[k]=true; DB.reservationIds[k]=r.id;
+      }
     });
-  });
-}
-</script>
-</body>
-</html
-  </div>
-</div>
-
-<div class="fov" id="fov" onclick="closeFovClick(event)"><div class="fsh" id="fsh"></div></div>
-
-<script>
-var DB={
-  clubs:[
-    {name:'Padel Arena Libreville',loc:'Centre-ville',openFrom:7,openTo:23,prices:{60:5000,90:7000,120:9000},hasMachine:true,machinePrice:3000,machineBalls:'30 balles',desc:'',
-     extras:[{n:'Balles (3)',p:1500},{n:'Eau',p:500},{n:'Raquette',p:2000}],
-     courts:[{name:'Court 1',type:'Intérieur',open:true},{name:'Court 2',type:'Extérieur',open:true},{name:'Court 3',type:'Intérieur',open:true},{name:'Court 4',type:'Extérieur',open:false}],
-     coaches:[{n:'Marco Silva',init:'MS',bg:'#E6F1FB',tc:'#0C447C',court:'Court 1',level:'Pro',price:'15 000 XAF/h',slots:['09h','10h','14h','16h']},
-              {n:'Isabelle Ondo',init:'IO',bg:'#E1F5EE',tc:'#085041',court:'Court 2',level:'Débutants',price:'10 000 XAF/h',slots:['08h','11h','15h']},
-              {n:'Paul Nzamba',init:'PN',bg:'#FAEEDA',tc:'#412402',court:'Court 3',level:'Inter/Avancé',price:'12 000 XAF/h',slots:['10h','13h','17h']}]},
-    {name:'Club Omnisports Gabon',loc:'Owendo',openFrom:8,openTo:21,prices:{60:4000,90:6000,120:8000},hasMachine:false,machinePrice:0,machineBalls:'',desc:'',
-     extras:[{n:'Eau',p:500},{n:'Balles',p:1200}],
-     courts:[{name:'Court 1',type:'Extérieur',open:true},{name:'Court 2',type:'Extérieur',open:true},{name:'Court 3',type:'Extérieur',open:false}],
-     coaches:[{n:'Régis Moussavou',init:'RM',bg:'#EEEDFE',tc:'#3C3489',court:'Court 1',level:'Tous niveaux',price:'10 000 XAF/h',slots:['09h','11h','16h']},
-              {n:'Christelle Bongo',init:'CB',bg:'#E1F5EE',tc:'#085041',court:'Court 2',level:'Débutants',price:'8 000 XAF/h',slots:['08h','10h','14h']}]},
-    {name:'SportPark Akanda',loc:'Akanda',openFrom:7,openTo:22,prices:{60:4500,90:6500,120:8500},hasMachine:true,machinePrice:2500,machineBalls:'25 balles',desc:'',
-     extras:[{n:'Balles',p:1000},{n:'Eau+serviette',p:1000},{n:'Boisson',p:800}],
-     courts:[{name:'Court 1',type:'Intérieur',open:true},{name:'Court 2',type:'Extérieur',open:true},{name:'Court 3',type:'Intérieur',open:false}],
-     coaches:[{n:'Sandra Koumba',init:'SK',bg:'#E1F5EE',tc:'#085041',court:'Court 1',level:'Débutants',price:'9 000 XAF/h',slots:['08h','10h','14h']},
-              {n:'Thierry Bongo',init:'TB',bg:'#FAEEDA',tc:'#412402',court:'Court 2',level:'Pro',price:'14 000 XAF/h',slots:['09h','11h','15h','17h']}]},
-    {name:'Padel Club Nzeng',loc:'Nzeng-Ayong',openFrom:9,openTo:21,prices:{60:3500,90:5000,120:6500},hasMachine:false,machinePrice:0,machineBalls:'',desc:'',
-     extras:[{n:'Eau',p:400},{n:'Balles',p:1000}],
-     courts:[{name:'Court 1',type:'Extérieur',open:true},{name:'Court 2',type:'Extérieur',open:true}],
-     coaches:[{n:'Fabrice Nnang',init:'FN',bg:'#EEEDFE',tc:'#3C3489',court:'Court 1',level:'Tous niveaux',price:'8 000 XAF/h',slots:['09h','11h','15h']}]},
-    {name:'Arena Sport LBV',loc:'Quartier Louis',openFrom:8,openTo:22,prices:{60:3000,90:4500,120:6000},hasMachine:false,machinePrice:0,machineBalls:'',desc:'',
-     extras:[{n:'Eau',p:400}],
-     courts:[{name:'Court 1',type:'Intérieur',open:true},{name:'Court 2',type:'Intérieur',open:true}],
-     coaches:[{n:'Serge Mouele',init:'SM',bg:'#E6F1FB',tc:'#0C447C',court:'Court 1',level:'Intermédiaire',price:'9 000 XAF/h',slots:['10h','14h','16h']}]},
-    {name:'Padel Sud Libreville',loc:'Sud Libreville',openFrom:8,openTo:22,suspended:true,suspendedReason:'Abonnement impayé · 2 mois',
-     prices:{60:4000,90:6000,120:8000},hasMachine:false,machinePrice:0,machineBalls:'',desc:'',extras:[],
-     courts:[{name:'Court 1',type:'Extérieur',open:true},{name:'Court 2',type:'Extérieur',open:true}],coaches:[]}
-  ],
-  products:[
-    {em:'🎾',n:'Babolat Air Viper',b:'Pro · Carbon',p:49000,o:70000,img:''},
-    {em:'🎾',n:'Head Alpha Pro',b:'Intermédiaire',p:35000,o:50000,img:''},
-    {em:'🎾',n:'Wilson Blade Jr',b:'Débutant',p:21000,o:30000,img:''},
-    {em:'🎾',n:'Adidas Match 3.2',b:'Club',p:28000,o:40000,img:''},
-    {em:'🎒',n:'Sac padel Pro',b:'SportShop LBV',p:18000,o:25000,img:''},
-    {em:'👟',n:'Chaussures Padel X',b:'Asics',p:42000,o:60000,img:''}
-  ],
-  pubs:[
-    {n:'Padel Arena — Weekend -20%',cl:'Padel Arena',t:'Club',v:847,ck:23,p:30000,img:''},
-    {n:'SportShop LBV — Flash raquettes',cl:'SportShop LBV',t:'Magasin',v:1204,ck:67,p:50000,img:''},
-    {n:'GabonSport — Collection 2026',cl:'GabonSport',t:'Magasin',v:532,ck:18,p:30000,img:''},
-    {n:'Open Libreville — Sponsoring',cl:'Padel Arena',t:'Tournoi',v:390,ck:41,p:25000,img:''},
-    {n:'Club Omnisports — Promo',cl:'Club Omnisports',t:'Club',v:215,ck:9,p:15000,img:''}
-  ],
-  players:[
-    {n:'Koumba Ndong',lv:'Avancé',g:42,bg:'#E1F5EE',tc:'#085041',i:'KN'},
-    {n:'Jean-Baptiste M.',lv:'Intermédiaire',g:28,bg:'#E6F1FB',tc:'#0C447C',i:'JB'},
-    {n:'Sylvie Ondo',lv:'Débutant',g:8,bg:'#EEEDFE',tc:'#3C3489',i:'SO'},
-    {n:'Patrick Nzamba',lv:'Avancé',g:61,bg:'#FAEEDA',tc:'#412402',i:'PN'},
-    {n:'Marie-Claire B.',lv:'Intermédiaire',g:19,bg:'#FCEBEB',tc:'#791F1F',i:'MC'}
-  ],
-  reservations:{},
-  tournaments:[
-    {name:'Open de Libreville 2026',club:'Padel Arena',date:'14-15 juin',max:32,inscrits:20,prix:5000,type:'Mixte',status:'open'},
-    {name:'Championnat Gabon Padel',club:'Club Omnisports',date:'5-6 juillet',max:32,inscrits:8,prix:15000,type:'Doubles',status:'soon'},
-    {name:'Akanda Summer Cup',club:'SportPark Akanda',date:'20 juillet',max:24,inscrits:24,prix:3000,type:'Simple',status:'full'}
-  ]
-};
-
-// STATE
-var curCI=0,curCourtI=0,curDur=0,curMachine=false,curExtras=[],curDateKey='',lvlFilter='Tous';
-
-// HELPERS
-function padZ(n){return n<10?'0'+n:String(n);}
-function tStr(m){return padZ(Math.floor(m/60))+'h'+(m%60===0?'00':'30');}
-function durLbl(d){return d===60?'1h00':d===90?'1h30':'2h00';}
-function rCode(){return 'PG-'+(1000+Math.floor(Math.random()*9000));}
-function mkDK(d){return d.getFullYear()+'-'+padZ(d.getMonth()+1)+'-'+padZ(d.getDate());}
-function fmtDK(dk){
-  var p=dk.split('-'),d=new Date(+p[0],+p[1]-1,+p[2]);
-  var dn=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
-  var mn=['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
-  return dn[d.getDay()]+' '+d.getDate()+' '+mn[d.getMonth()];
-}
-function rk(ci,coi,dk,t){return ci+'-'+coi+'-'+dk+'-'+t;}
-function isBooked(ci,coi,dk,sM,eM){
-  // Check every 30-min block in the requested range
-  for(var t=sM;t<eM;t+=30){
-    if(DB.reservations[rk(ci,coi,dk,t)])return true;
-  }
-  return false;
-}
-function showMsg(msg){
-  var el=document.getElementById('mtoast');
-  el.textContent=msg;el.style.display='block';
-  setTimeout(function(){el.style.display='none';},2500);
-}
-
-// NAVIGATION
-function gP(id,ci){
-  var all=document.querySelectorAll('#PS .pg');
-  for(var i=0;i<all.length;i++)all[i].classList.remove('act');
-  document.getElementById(id).classList.add('act');
-  if(id==='p-club'&&ci!==undefined){curCI=ci;curCourtI=0;curDur=0;curMachine=false;curExtras=[];loadClub();}
-  if(id==='p-players')renderPlayers(DB.players);
-  if(id==='p-coaches')renderCoaches();
-  if(id==='p-shop')renderShop();
-}
-
-// HOME CLUBS
-function renderHomeClubs(){
-  var list=document.getElementById('home-clubs-list');
-  list.innerHTML='';
-  for(var i=0;i<DB.clubs.length;i++){
-    if(DB.clubs[i].suspended)continue;
-    (function(idx){
-      var c=DB.clubs[idx];
-      var open=c.courts.filter(function(x){return x.open;}).length;
-      var card=document.createElement('div');card.className='card';
-      card.innerHTML='<div class="cn">'+c.name+'</div>'+
-        '<div class="cs">📍 '+c.loc+' · '+c.courts.length+' courts · Ouvert '+c.openFrom+'h-'+c.openTo+'h</div>'+
-        '<div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap">'+
-          '<span class="bdg bg">'+open+' courts ouverts</span>'+
-          (c.coaches.length?'<span class="bdg bb">'+c.coaches.length+' coachs</span>':'')+
-          (c.hasMachine?'<span class="bdg ba">Machine</span>':'')+
-        '</div>';
-      card.onclick=function(){gP('p-club',idx);};
-      list.appendChild(card);
-    })(i);
-  }
-}
-
-// LOAD CLUB PAGE
-function loadClub(){
-  var cl=DB.clubs[curCI];
-  document.getElementById('club-title').textContent=cl.name;
-  document.getElementById('club-hours-sub').textContent='Ouvert '+cl.openFrom+'h00 - '+cl.openTo+'h00';
-  document.getElementById('dp60').textContent=cl.prices[60].toLocaleString()+' XAF';
-  document.getElementById('dp90').textContent=cl.prices[90].toLocaleString()+' XAF';
-  document.getElementById('dp120').textContent=cl.prices[120].toLocaleString()+' XAF';
-  document.getElementById('cf-club').textContent=cl.name;
-  if(cl.hasMachine){
-    document.getElementById('machine-sec').style.display='block';
-    document.getElementById('mach-price').textContent=cl.machinePrice.toLocaleString()+' XAF';
-    document.getElementById('mach-balls').textContent=cl.machineBalls;
-    var cb=document.getElementById('mach-cb');cb.classList.remove('on');cb.textContent='';curMachine=false;
-  }else document.getElementById('machine-sec').style.display='none';
-  // Reset dur buttons
-  var dbtns=document.querySelectorAll('.dbtn');
-  for(var i=0;i<dbtns.length;i++){
-    dbtns[i].style.border='1.5px solid #e5e5e5';dbtns[i].style.background='#fff';dbtns[i].style.color='#666';
-    var dp=dbtns[i].querySelector('.dp');if(dp)dp.style.color='#aaa';
-  }
-  curDur=0;
-  document.getElementById('slot-hint').style.display='block';
-  document.getElementById('slots-wrap').style.display='none';
-  document.getElementById('conf-box').style.display='none';
-  document.getElementById('extras-sec').style.display='none';
-  buildCalendar();
-  buildCourtTabs();
-}
-
-// CALENDAR — fixed, no bugs
-function buildCalendar(){
-  var row=document.getElementById('cal-row');
-  row.innerHTML='';
-  var today=new Date();today.setHours(0,0,0,0);
-  var DAYS=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
-  var MONS=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
-  // Set today as default date
-  curDateKey=mkDK(today);
-  for(var i=0;i<14;i++){
-    (function(idx){
-      var d=new Date(today.getTime());
-      d.setDate(today.getDate()+idx);
-      var dk=mkDK(d);
-      var btn=document.createElement('div');
-      btn.className='calbtn'+(idx===0?' sel':'');
-      btn.innerHTML='<div class="cday">'+DAYS[d.getDay()]+'</div>'+
-        '<div class="cnum">'+d.getDate()+'</div>'+
-        '<div class="cmon">'+(idx===0?'Auj.':MONS[d.getMonth()])+'</div>';
-      btn.onclick=function(){
-        // Highlight selected date
-        var all=document.querySelectorAll('.calbtn');
-        for(var k=0;k<all.length;k++)all[k].classList.remove('sel');
-        btn.classList.add('sel');
-        // Update current date
-        curDateKey=dk;
-        // Hide confirm box
-        document.getElementById('conf-box').style.display='none';
-        // Always rebuild slots when date changes (if duration selected)
-        if(curDur>0){
-          buildSlots();
-        }
-      };
-      row.appendChild(btn);
-    })(i);
-  }
-}
-
-// COURT TABS
-function buildCourtTabs(){
-  var cl=DB.clubs[curCI];
-  var ct=document.getElementById('court-tabs');
-  ct.innerHTML='';
-  for(var j=0;j<cl.courts.length;j++){
-    (function(jdx){
-      var c=cl.courts[jdx];
-      var btn=document.createElement('div');
-      btn.style.cssText='padding:7px 10px;border-radius:9px;font-size:11px;font-weight:700;cursor:pointer;user-select:none;'+
-        (jdx===0?'background:#1A7A4A;color:#fff;border:1.5px solid #1A7A4A':'border:1.5px solid #e5e5e5;color:#666;background:#fff');
-      btn.innerHTML=c.name+
-        '<div style="font-size:9px;font-weight:500;margin-top:1px;opacity:.8">'+
-          (c.type==='Intérieur'?'🏠':'☀️')+' '+c.type+(c.open?'':' · Fermé')+
-        '</div>';
-      btn.onclick=function(){
-        if(!c.open){showMsg('Ce court est fermé.');return;}
-        curCourtI=jdx;
-        var all=ct.children;
-        for(var k=0;k<all.length;k++){all[k].style.background='#fff';all[k].style.color='#666';all[k].style.border='1.5px solid #e5e5e5';}
-        btn.style.background='#1A7A4A';btn.style.color='#fff';btn.style.border='1.5px solid #1A7A4A';
-        var picked=document.querySelectorAll('.sl.picked');
-        for(var k=0;k<picked.length;k++){picked[k].classList.remove('picked');picked[k].classList.add('free');}
-        document.getElementById('conf-box').style.display='none';
-        if(curDur>0)buildSlots();
-      };
-      ct.appendChild(btn);
-    })(j);
-  }
-}
-
-// DURATION
-function setDur(el,d){
-  var dbtns=document.querySelectorAll('.dbtn');
-  for(var i=0;i<dbtns.length;i++){
-    dbtns[i].style.border='1.5px solid #e5e5e5';dbtns[i].style.background='#fff';dbtns[i].style.color='#666';
-    var dp=dbtns[i].querySelector('.dp');if(dp)dp.style.color='#aaa';
-  }
-  el.style.border='1.5px solid #1A7A4A';el.style.background='#1A7A4A';el.style.color='#fff';
-  var dp=el.querySelector('.dp');if(dp)dp.style.color='rgba(255,255,255,.75)';
-  curDur=d;
-  document.getElementById('slot-hint').style.display='none';
-  document.getElementById('slots-wrap').style.display='block';
-  document.getElementById('conf-box').style.display='none';
-  buildSlots();
-}
-
-// BUILD SLOTS — uses club openFrom/openTo
-function buildSlots(){
-  var cl=DB.clubs[curCI];
-  var court=cl.courts[curCourtI];
-  var from=cl.openFrom; // e.g. 7 means 7:00
-  var to=cl.openTo;     // e.g. 23 means last session can START at 23:00-dur
-  var g=document.getElementById('slot-grid');
-  g.innerHTML='';
-  var noMsg=document.getElementById('no-slots-msg');
-  var count=0;
-  document.getElementById('court-lbl-info').textContent=court.name+' · '+fmtDK(curDateKey);
-  // Loop from opening hour to closing hour, every 30 min
-  for(var h=from;h<to;h++){
-    for(var mn=0;mn<60;mn+=30){
-      var sM=h*60+mn;
-      var eM=sM+curDur;
-      // Session must END by closing time
-      if(eM>to*60)continue;
-      count++;
-      var div=document.createElement('div');
-      div.className='sl';
-      div.textContent=tStr(sM);
-      var taken=!court.open||isBooked(curCI,curCourtI,curDateKey,sM,eM);
-      if(taken){
-        div.classList.add('taken');
-      }else{
-        div.classList.add('free');
-        (function(sStart,sEnd,slDiv){
-          slDiv.onclick=function(){
-            var picked=document.querySelectorAll('.sl.picked');
-            for(var k=0;k<picked.length;k++){picked[k].classList.remove('picked');picked[k].classList.add('free');}
-            slDiv.classList.remove('free');slDiv.classList.add('picked');
-            showConfirm(sStart,sEnd);
-          };
-        })(sM,eM,div);
+    var tours=await sbLoadTournaments();
+    if(tours && tours.length>0){
+      DB.tournaments=tours.map(function(t){
+        return{_id:t.id,name:t.name,club:t.clubs?t.clubs.name:'',
+          startDate:t.start_date,endDate:t.end_date||t.start_date,
+          max:t.max_players,inscrits:t.registered_count,prix:t.entry_fee,
+          type:t.type,status:t.status,
+          paymentPhone:t.payment_phone,paymentProvider:t.payment_provider};
+      });
+    }
+    // ── Bannière verte IMMÉDIATEMENT après chargement Supabase ──
+    if(sbLoaded){
+      var banner=document.querySelector('[style*="B71C1C"]');
+      if(banner){
+        banner.textContent='✅ Application connectée — données réelles';
+        banner.style.background='#1A7A4A';
       }
-      g.appendChild(div);
     }
-  }
-  if(count===0){noMsg.style.display='block';g.style.display='none';}
-  else{noMsg.style.display='none';g.style.display='grid';}
-}
-
-// CONFIRM BOX
-function showConfirm(sM,eM){
-  var cl=DB.clubs[curCI],court=cl.courts[curCourtI];
-  document.getElementById('cf-date').textContent=fmtDK(curDateKey);
-  document.getElementById('cf-court').textContent=court.name+' · '+court.type;
-  document.getElementById('cf-start').textContent=tStr(sM);
-  document.getElementById('cf-end').textContent=tStr(eM)+' ('+durLbl(curDur)+')';
-  // Build extras
-  curExtras=new Array(cl.extras.length).fill(false);
-  var el2=document.getElementById('extras-list');el2.innerHTML='';
-  for(var i=0;i<cl.extras.length;i++){
-    var row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;cursor:pointer';
-    row.style.borderBottom=i===cl.extras.length-1?'none':'1px solid #f0f0f0';
-    var cb=document.createElement('div');cb.className='excb';cb.id='ecb'+i;
-    var nm=document.createElement('span');nm.style.cssText='font-size:12px;flex:1;color:#111';nm.textContent=cl.extras[i].n;
-    var pr=document.createElement('span');pr.style.cssText='font-size:12px;font-weight:700;color:#1A7A4A';pr.textContent=cl.extras[i].p.toLocaleString()+' XAF';
-    row.appendChild(cb);row.appendChild(nm);row.appendChild(pr);
-    (function(idx){row.onclick=function(){toggleExt(idx);};})(i);
-    el2.appendChild(row);
-  }
-  document.getElementById('extras-sec').style.display=cl.extras.length?'block':'none';
-  updateTotal(sM,eM);
-  document.getElementById('conf-box').style.display='block';
-  // Store for confirmResa
-  document.getElementById('conf-box').dataset.sm=sM;
-  document.getElementById('conf-box').dataset.em=eM;
-  setTimeout(function(){document.getElementById('conf-box').scrollIntoView({behavior:'smooth',block:'nearest'});},100);
-}
-
-function confirmResa(){
-  var cb=document.getElementById('conf-box');
-  var sM=parseInt(cb.dataset.sm),eM=parseInt(cb.dataset.em);
-  var cl=DB.clubs[curCI],court=cl.courts[curCourtI];
-  // Block ALL 30-min slots for the full duration
-  // dur=60 (1h): blocks sM and sM+30 (2 slots)
-  // dur=90 (1h30): blocks sM, sM+30, sM+60 (3 slots)  
-  // dur=120 (2h): blocks sM, sM+30, sM+60, sM+90 (4 slots)
-  var numSlots = curDur / 30; // number of 30-min blocks
-  for(var s=0; s<numSlots; s++){
-    DB.reservations[rk(curCI,curCourtI,curDateKey,sM+(s*30))]=true;
-  }
-  // Success page
-  document.getElementById('s-resa-d').textContent=court.name+' · '+court.type+'\n'+fmtDK(curDateKey)+'\n'+tStr(sM)+' → '+tStr(eM)+' ('+durLbl(curDur)+')\n'+cl.name;
-  document.getElementById('s-code').textContent=rCode();
-  addToHistory(cl.name,court.name+' · '+court.type,fmtDK(curDateKey),tStr(sM),tStr(eM),curCI,curCourtI,curDateKey,sM,eM);
-  if(typeof addClubNotif==='function') addClubNotif(curCI,court.name,fmtDK(curDateKey),tStr(sM),tStr(eM));
-  // Notify club panel if this club is connected
-  addClubNotif(curCI, court.name, fmtDK(curDateKey), tStr(sM), tStr(eM));
-  buildSlots();
-  document.getElementById('conf-box').style.display='none';
-  gP('p-resa-ok');
-}
-
-function addToHistory(clubName,courtInfo,dateStr,startT,endT,ci,coi,dk,sm,em){
-  var list=document.getElementById('history-list');
-  var firstLbl=list.querySelector('.lbl');
-  var h=document.createElement('div');
-  h.className='hist';
-  var id='h'+Date.now();
-  h.id=id;
-  // Store data for cancellation
-  h.dataset.ci=ci; h.dataset.coi=coi; h.dataset.dk=dk; h.dataset.sm=sm; h.dataset.em=em;
-
-  // Build with createElement - no quote escaping issues
-  var hic=document.createElement('div');
-  hic.className='hic'; hic.style.background='#E1F5EE'; hic.textContent='🎾';
-
-  var body=document.createElement('div'); body.style.flex='1';
-  var title=document.createElement('div'); title.style.cssText='font-size:12px;font-weight:700;color:#111'; title.textContent=clubName;
-  var sub1=document.createElement('div'); sub1.style.cssText='font-size:11px;color:#666;margin-top:1px'; sub1.textContent=courtInfo+' · '+dateStr;
-  var sub2=document.createElement('div'); sub2.style.cssText='font-size:11px;color:#666'; sub2.textContent=startT+' → '+endT;
-  var cancelBtn=document.createElement('button');
-  cancelBtn.style.cssText='font-size:10px;padding:2px 7px;border-radius:5px;background:#FCEBEB;color:#791F1F;border:none;cursor:pointer;margin-top:4px';
-  cancelBtn.textContent='✕ Annuler';
-  (function(hid){ cancelBtn.onclick=function(){ cancelResa(hid); }; })(id);
-  body.appendChild(title); body.appendChild(sub1); body.appendChild(sub2); body.appendChild(cancelBtn);
-
-  var status=document.createElement('span');
-  status.style.cssText='font-size:11px;font-weight:700;color:#1A7A4A'; status.textContent='✓ Confirmé';
-
-  h.appendChild(hic); h.appendChild(body); h.appendChild(status);
-
-  if(firstLbl&&firstLbl.nextSibling) firstLbl.parentNode.insertBefore(h,firstLbl.nextSibling);
-  else list.appendChild(h);
-}
-
-function cancelResa(id){
-  var el=document.getElementById(id);
-  if(!el) return;
-  // Unblock slots in DB.reservations
-  var ci=parseInt(el.dataset.ci);
-  var coi=parseInt(el.dataset.coi);
-  var dk=el.dataset.dk;
-  var sm=parseInt(el.dataset.sm);
-  var em=parseInt(el.dataset.em);
-  if(!isNaN(ci) && !isNaN(coi) && dk && !isNaN(sm) && !isNaN(em)){
-    var numSlots=(em-sm)/30;
-    for(var s=0;s<numSlots;s++){
-      var key=rk(ci,coi,dk,sm+(s*30));
-      delete DB.reservations[key];
-    }
-  }
-  // Update visual - show as cancelled
-  el.style.opacity='0.5';
-  el.style.background='#fafafa';
-  var btns=el.querySelectorAll('button');
-  for(var i=0;i<btns.length;i++) btns[i].remove();
-  var spans=el.querySelectorAll('span');
-  for(var i=0;i<spans.length;i++){ spans[i].textContent='Annulé'; spans[i].style.color='#791F1F'; }
-}
-
-function toggleExt(i){
-  curExtras[i]=!curExtras[i];
-  var cb=document.getElementById('ecb'+i);
-  if(curExtras[i]){cb.classList.add('on');cb.textContent='✓';}else{cb.classList.remove('on');cb.textContent='';}
-  var c=document.getElementById('conf-box');
-  updateTotal(parseInt(c.dataset.sm),parseInt(c.dataset.em));
-}
-
-function toggleMachine(){
-  curMachine=!curMachine;
-  var cb=document.getElementById('mach-cb');
-  if(curMachine){cb.classList.add('on');cb.textContent='✓';}else{cb.classList.remove('on');cb.textContent='';}
-  var row=document.getElementById('cf-mach'),cl=DB.clubs[curCI];
-  if(curMachine&&cl.hasMachine){row.style.display='flex';document.getElementById('cf-mach-v').textContent=cl.machinePrice.toLocaleString()+' XAF ('+cl.machineBalls+')';}
-  else row.style.display='none';
-  var c=document.getElementById('conf-box');updateTotal(parseInt(c.dataset.sm),parseInt(c.dataset.em));
-}
-
-function updateTotal(sM,eM){
-  var cl=DB.clubs[curCI];
-  var total=cl.prices[curDur]||0;
-  for(var i=0;i<cl.extras.length;i++)if(curExtras[i])total+=cl.extras[i].p;
-  if(curMachine&&cl.hasMachine)total+=cl.machinePrice;
-  document.getElementById('cf-total').textContent=total.toLocaleString()+' XAF';
-  var er=document.getElementById('cf-extras');er.innerHTML='';
-  for(var i=0;i<cl.extras.length;i++){
-    if(curExtras[i]){
-      var row=document.createElement('div');row.className='cr';
-      row.innerHTML='<span class="cl2">'+cl.extras[i].n+'</span><span class="cv">'+cl.extras[i].p.toLocaleString()+' XAF</span>';
-      er.appendChild(row);
-    }
-  }
-}
-
-// COACHES
-function renderCoaches(){
-  var cl=DB.clubs[curCI];
-  document.getElementById('coach-sub').textContent=cl.name;
-  var list=document.getElementById('coaches-list');list.innerHTML='';
-  if(!cl.coaches.length){list.innerHTML='<div style="text-align:center;font-size:12px;color:#888;padding:20px">Aucun coach</div>';return;}
-  for(var i=0;i<cl.coaches.length;i++){
-    (function(c){
-      var d=document.createElement('div');d.className='coch';
-      var av=document.createElement('div');av.style.cssText='width:36px;height:36px;border-radius:50%;background:'+c.bg+';color:'+c.tc+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0';av.textContent=c.init;
-      var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+c.n+'</div><div style="font-size:10px;color:#666;margin-top:2px">'+c.court+' · '+c.level+'<br>'+c.price+' · '+c.slots.join(' · ')+'</div>';
-      var btn=document.createElement('button');btn.style.cssText='font-size:11px;padding:4px 8px;border-radius:7px;border:1px solid #1A3A8A;color:#1A3A8A;background:#E6F1FB;cursor:pointer';btn.textContent='Réserver';
-      btn.onclick=function(){document.getElementById('s-coach-d').textContent='Coach : '+c.n+'\n'+c.court+' · '+c.slots[0]+'\n'+DB.clubs[curCI].name;gP('p-coach-ok');};
-      d.appendChild(av);d.appendChild(info);d.appendChild(btn);list.appendChild(d);
-    })(cl.coaches[i]);
-  }
-}
-
-// PLAYERS
-function renderPlayers(list){
-  var d=document.getElementById('players-list');d.innerHTML='';
-  for(var i=0;i<list.length;i++){
-    var p=list[i];
-    if(lvlFilter!=='Tous'&&p.lv!==lvlFilter)continue;
-    var lbg=p.lv==='Avancé'?'#FAEEDA':p.lv==='Intermédiaire'?'#E6F1FB':'#E1F5EE';
-    var ltc=p.lv==='Avancé'?'#633806':p.lv==='Intermédiaire'?'#0C447C':'#085041';
-    var el=document.createElement('div');el.className='plyr';
-    // Avatar + info
-    var av=document.createElement('div');av.style.cssText='width:34px;height:34px;border-radius:50%;background:'+p.bg+';color:'+p.tc+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0';av.textContent=p.i;
-    var info=document.createElement('div');info.style.flex='1';
-    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#111">'+p.n+'</div>'+
-      '<div style="margin-top:2px"><span style="font-size:9px;padding:1px 5px;border-radius:4px;background:'+lbg+';color:'+ltc+';font-weight:600">'+p.lv+'</span> <span style="font-size:10px;color:#aaa">'+p.g+' matchs</span></div>';
-    // Invite button - use closure to capture player name
-    var btn=document.createElement('button');
-    btn.style.cssText='font-size:11px;padding:4px 8px;border-radius:7px;border:1px solid #1A3A8A;color:#1A3A8A;background:#E6F1FB;cursor:pointer';
-    btn.textContent='Inviter';
-    (function(playerName, b){ b.onclick=function(){ sendInv(b, playerName); }; })(p.n, btn);
-    el.appendChild(av); el.appendChild(info); el.appendChild(btn);
-    d.appendChild(el);
-  }
-}
-function filterPlayers(v){renderPlayers(DB.players.filter(function(p){return p.n.toLowerCase().indexOf(v.toLowerCase())>=0;}));}
-function filterLvl(l){lvlFilter=l;renderPlayers(DB.players);}
-
-
-function renderShop(){
-  var g=document.getElementById('shop-products');g.innerHTML='';
-  for(var i=0;i<DB.products.length;i++){
-    var p=DB.products[i];
-    var card=document.createElement('div');card.className='card';card.style.cursor='default';
-    var img=document.createElement('div');img.style.cssText='height:54px;border-radius:8px;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:5px;overflow:hidden';
-    if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:100%;object-fit:cover';img.appendChild(im);}else img.textContent=p.em;
-    card.appendChild(img);
-    card.innerHTML+='<div style="font-size:11px;font-weight:700;color:#111">'+p.n+'</div><div style="font-size:10px;color:#666">'+p.b+'</div>'+
-      '<div style="font-size:12px;font-weight:700;color:#1A7A4A;margin-top:3px">'+p.p.toLocaleString()+' <span style="font-size:9px;color:#aaa;text-decoration:line-through">'+p.o.toLocaleString()+'</span></div>'+
-      '<div style="font-size:9px;background:#FCEBEB;color:#791F1F;border-radius:3px;padding:1px 5px;display:inline-block;margin-top:2px">-'+Math.round((1-p.p/p.o)*100)+'%</div>';
-    g.appendChild(card);
-  }
-}
-
-// AUTH
-function doLogin(){
-  var e=document.getElementById('li-em').value,p=document.getElementById('li-pw').value;
-  if(!e||!p){showMsg('Remplis email et mot de passe !');return;}gP('p-home');
-}
-function doRegister(){
-  var fn=document.getElementById('rg-fn').value,em=document.getElementById('rg-em').value,pw=document.getElementById('rg-pw').value;
-  var lv=document.getElementById('rg-lv').value,ln=document.getElementById('rg-ln').value;
-  if(!fn||!em||!pw){showMsg('Remplis tous les champs !');return;}
-  document.getElementById('p-av').textContent=(fn[0]+(ln?ln[0]:'')).toUpperCase();
-  document.getElementById('p-nm').textContent=fn+' '+ln;
-  document.getElementById('p-lv').textContent='Niveau '+(lv||'Débutant')+' · Libreville';
-  document.getElementById('p-level').textContent=lv||'Débutant';
-  document.getElementById('p-email').textContent=em;
-  document.getElementById('p-phone').textContent=document.getElementById('rg-ph').value||'+241 07 XX XX XX';
-  document.getElementById('home-greet').textContent='Bonjour '+fn+' !';
-  gP('p-home');
-}
-
-// ============ ADMIN ============
-function buildCourtSelector(){
-  var sel=document.getElementById('court-sel');sel.innerHTML='';
-  for(var i=0;i<DB.clubs.length;i++){
-    if(DB.clubs[i].suspended)continue;
-    var opt=document.createElement('option');opt.value=i;opt.textContent=DB.clubs[i].name+' ('+DB.clubs[i].courts.length+')';sel.appendChild(opt);
-  }
-}
-
-function renderAdminClubs(){
-  var AL=document.getElementById('clubs-list'),SL=document.getElementById('clubs-susp-list');
-  AL.innerHTML='';SL.innerHTML='';
-  var ac=0,sc=0;
-  for(var i=0;i<DB.clubs.length;i++){
-    (function(idx){
-      var c=DB.clubs[idx];
-      var row=document.createElement('div');row.className='clubrow';row.style.flexDirection='column';row.style.padding='0';
-      var main=document.createElement('div');main.style.cssText='display:flex;align-items:center;gap:7px;padding:7px';
-      if(c.suspended){
-        sc++;
-        main.innerHTML='<div class="cdot" style="background:#E24B4A"></div>'+
-          '<div class="cinfo"><div class="cname-a">'+c.name+'</div><div class="cmeta" style="color:#F09595">'+c.suspendedReason+'</div></div>';
-        var acts=document.createElement('div');acts.style='display:flex;gap:4px';
-        var re=document.createElement('button');re.className='be';re.textContent='✓ Réactiver';
-        re.style.cssText='background:#E1F5EE;color:#085041;border:none;border-radius:5px;padding:3px 7px;font-size:10px;font-weight:600;cursor:pointer';
-        re.onclick=function(){DB.clubs[idx].suspended=false;DB.clubs[idx].suspendedReason='';renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();showMsg('✅ Réactivé !');};
-        var dl=document.createElement('button');dl.className='bd';dl.textContent='🗑 Suppr.';
-        dl.onclick=function(){showIC(row,'Supprimer '+c.name+' ?',function(){DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
-        acts.appendChild(re);acts.appendChild(dl);main.appendChild(acts);row.appendChild(main);SL.appendChild(row);
-      }else{
-        ac++;
-        main.innerHTML='<div class="cdot" style="background:#1A7A4A"></div>'+
-          '<div class="cinfo"><div class="cname-a">'+c.name+'</div><div class="cmeta">'+c.loc+' · '+c.courts.length+' courts · '+c.openFrom+'h-'+c.openTo+'h</div></div>';
-        var acts=document.createElement('div');acts.style='display:flex;gap:4px';
-        var ge=document.createElement('button');ge.className='be';ge.textContent='Gérer';ge.onclick=function(){openEditClub(idx);};
-        var sp=document.createElement('button');sp.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FAEEDA;color:#633806;border:none;cursor:pointer;font-weight:600';sp.textContent='⏸';
-        sp.onclick=function(){showIC(row,'Suspendre '+c.name+' ?',function(){DB.clubs[idx].suspended=true;DB.clubs[idx].suspendedReason='Suspendu manuellement';renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx){cpLogout();}showMsg('⚠️ Suspendu.');});};
-        var dl=document.createElement('button');dl.className='bd';dl.textContent='✕';
-        dl.onclick=function(){showIC(row,'Supprimer '+c.name+' ?',function(){DB.clubs.splice(idx,1);renderAdminClubs();renderHomeClubs();buildCourtSelector();cpInit();if(cpCI===idx||cpCI>=DB.clubs.length){cpCI=-1;document.getElementById('club-panel-login').style.display='block';document.getElementById('club-panel-dash').style.display='none';}showMsg('✅ Supprimé.');});};
-        acts.appendChild(ge);acts.appendChild(sp);acts.appendChild(dl);main.appendChild(acts);row.appendChild(main);AL.appendChild(row);
-      }
-    })(i);
-  }
-  document.getElementById('clubs-count').textContent=ac;document.getElementById('stat-clubs').textContent=ac;
-  var ss=document.getElementById('susp-section');ss.style.display=sc?'block':'none';document.getElementById('susp-count').textContent=sc;
-  buildCourtSelector();
-}
-
-function showIC(parentRow,msg,onYes){
-  var old=parentRow.querySelector('.iconfirm');if(old){old.remove();return;}
-  var row=document.createElement('div');row.className='iconfirm';
-  var lbl=document.createElement('span');lbl.style.cssText='font-size:11px;color:#F09595;flex:1';lbl.textContent=msg;
-  var yes=document.createElement('button');yes.style.cssText='font-size:11px;padding:3px 8px;border-radius:5px;background:#791F1F;color:#fff;border:none;cursor:pointer;font-weight:700;margin-left:6px';yes.textContent='✓ Oui';
-  yes.onclick=function(){row.remove();onYes();};
-  var no=document.createElement('button');no.style.cssText='font-size:11px;padding:3px 7px;border-radius:5px;background:#2A3444;color:#aaa;border:none;cursor:pointer;margin-left:4px';no.textContent='Non';
-  no.onclick=function(){row.remove();};
-  row.appendChild(lbl);row.appendChild(yes);row.appendChild(no);parentRow.appendChild(row);
-}
-
-// EDIT CLUB — pure JS, no template literals
-function openEditClub(ci){
-  var c=DB.clubs[ci];
-  var sh=document.getElementById('fsh');sh.innerHTML='';
-  // Title
-  var title=document.createElement('div');title.className='aft';
-  title.innerHTML=c.name.split(' ').slice(0,2).join(' ');
-  var cx=document.createElement('button');cx.className='afc';cx.textContent='✕';cx.onclick=closeForm;title.appendChild(cx);sh.appendChild(title);
-  // Helper
-  function mkRow(lbl,id,val,type,min,max){
-    var l=document.createElement('div');l.className='afl';l.textContent=lbl;sh.appendChild(l);
-    var inp=document.createElement('input');inp.className='afi';inp.id=id;inp.value=val;inp.type=type||'text';
-    if(min!==undefined)inp.min=min;if(max!==undefined)inp.max=max;sh.appendChild(inp);
-  }
-  // Abo toggle
-  var aRow=document.createElement('div');aRow.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #2A3444;margin-bottom:8px';
-  aRow.innerHTML="<div><div style='font-size:12px;color:#ccc'>Abonnement payé</div><div style='font-size:10px;color:#445'>Club visible dans l'app</div></div>";
-  var tog=document.createElement('div');tog.className='tog on';tog.onclick=function(){tog.classList.toggle('on');tog.classList.toggle('off');};
-  aRow.appendChild(tog);sh.appendChild(aRow);
-  // Hours
-  var hLbl=document.createElement('div');hLbl.className='afl';hLbl.textContent='Horaires ouverture';sh.appendChild(hLbl);
-  var hRow=document.createElement('div');hRow.className='af2';hRow.style.marginBottom='7px';
-  function mkHalf(lbl,id,val,min,max){
-    var d=document.createElement('div');
-    var l=document.createElement('div');l.className='afl';l.textContent=lbl;d.appendChild(l);
-    var inp=document.createElement('input');inp.className='afi';inp.id=id;inp.type='number';inp.value=val;inp.min=min;inp.max=max;d.appendChild(inp);
-    return d;
-  }
-  hRow.appendChild(mkHalf('Ouverture (ex: 7)','ep-from',c.openFrom,0,23));
-  hRow.appendChild(mkHalf('Fermeture (ex: 23)','ep-to',c.openTo,1,24));
-  sh.appendChild(hRow);
-  // Prices
-  mkRow('Prix 1h (XAF)','ep-60',c.prices[60],'number');
-  mkRow('Prix 1h30 (XAF)','ep-90',c.prices[90],'number');
-  mkRow('Prix 2h (XAF)','ep-120',c.prices[120],'number');
-  // Machine
-  var mLbl=document.createElement('div');mLbl.className='afl';mLbl.style.marginTop='6px';mLbl.textContent='Machine à balles';sh.appendChild(mLbl);
-  var mRow=document.createElement('div');mRow.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2A3444;margin-bottom:6px';
-  mRow.innerHTML="<span style='font-size:12px;color:#ccc'>Disponible</span>";
-  var mTog=document.createElement('div');mTog.className='tog '+(c.hasMachine?'on':'off');
-  var mWrap=document.createElement('div');mWrap.style.display=c.hasMachine?'block':'none';
-  mTog.onclick=function(){DB.clubs[ci].hasMachine=!DB.clubs[ci].hasMachine;mTog.classList.toggle('on');mTog.classList.toggle('off');mWrap.style.display=DB.clubs[ci].hasMachine?'block':'none';};
-  mRow.appendChild(mTog);sh.appendChild(mRow);
-  var mpL=document.createElement('div');mpL.className='afl';mpL.textContent='Prix location machine (XAF)';mWrap.appendChild(mpL);
-  var mpI=document.createElement('input');mpI.className='afi';mpI.id='ep-mach-p';mpI.type='number';mpI.value=c.machinePrice||2500;mWrap.appendChild(mpI);
-  var mbL=document.createElement('div');mbL.className='afl';mbL.textContent='Nombre de balles incluses';mWrap.appendChild(mbL);
-  var mbI=document.createElement('input');mbI.className='afi';mbI.id='ep-mach-b';mbI.type='number';mbI.value=parseInt(c.machineBalls)||25;mWrap.appendChild(mbI);
-  sh.appendChild(mWrap);
-  // Courts
-  var cLbl=document.createElement('div');cLbl.className='afl';cLbl.style.marginTop='8px';cLbl.id='edit-courts-lbl';sh.appendChild(cLbl);
-  var cBox=document.createElement('div');cBox.id='edit-courts-box';cBox.style.marginBottom='6px';sh.appendChild(cBox);
-  renderEditCourts(ci);
-  // Description
-  var dL=document.createElement('div');dL.className='afl';dL.style.marginTop='6px';dL.textContent='Description abonnement';sh.appendChild(dL);
-  var dTA=document.createElement('textarea');dTA.className='afi';dTA.id='ep-desc';dTA.rows=2;dTA.placeholder='Ex: 25 000 XAF/mois';dTA.style='resize:none;line-height:1.4';dTA.value=c.desc||'';sh.appendChild(dTA);
-  // Add court btn
-  var addBtn=document.createElement('button');addBtn.className='abtn abg';addBtn.style.marginTop='5px';addBtn.textContent='+ Ajouter un court';
-  (function(idx){addBtn.onclick=function(){oForm('add-court-to',idx);};})(ci);sh.appendChild(addBtn);
-  // Save
-  var sv=document.createElement('button');sv.className='asub';sv.style.marginTop='8px';sv.textContent='💾 Enregistrer';
-  (function(idx){sv.onclick=function(){saveClub(idx);};})(ci);sh.appendChild(sv);
-  var ca=document.createElement('button');ca.className='acan';ca.textContent='Annuler';ca.onclick=closeForm;sh.appendChild(ca);
-  document.getElementById('fov').classList.add('open');
-}
-
-function renderEditCourts(ci){
-  var c=DB.clubs[ci];
-  var lbl=document.getElementById('edit-courts-lbl');
-  var box=document.getElementById('edit-courts-box');
-  if(!lbl||!box)return;
-  lbl.textContent='Courts ('+c.courts.length+')';
-  box.innerHTML='';
-  if(!c.courts.length){
-    box.innerHTML='<div style="font-size:12px;color:#4CD68A;text-align:center;padding:8px;border:1px dashed #334;border-radius:7px">Aucun court</div>';return;
-  }
-  for(var j=0;j<c.courts.length;j++){
-    (function(ci2,cj){
-      var ct=DB.clubs[ci2].courts[cj];
-      var row=document.createElement('div');row.style.cssText='background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444;overflow:hidden';
-      var main=document.createElement('div');main.style.cssText='display:flex;align-items:center;gap:7px;padding:7px 8px';
-      var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
-      var tog=document.createElement('div');tog.className='tog '+(ct.open?'on':'off');tog.style.marginRight='4px';
-      (function(ci3,cj3,t){t.onclick=function(){DB.clubs[ci3].courts[cj3].open=!DB.clubs[ci3].courts[cj3].open;t.classList.toggle('on');t.classList.toggle('off');};})(ci2,cj,tog);
-      var del=document.createElement('button');del.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FCEBEB;color:#791F1F;border:none;cursor:pointer;font-weight:700';del.textContent='🗑';
-      (function(ci3,cj3){
-        del.onclick=function(){
-          var cf=row.querySelector('.iconfirm');if(cf){cf.remove();return;}
-          var cfRow=document.createElement('div');cfRow.className='iconfirm';
-          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Supprimer '+DB.clubs[ci3].courts[cj3].name+' ?</span>';
-          var yes=document.createElement('button');yes.style.cssText='font-size:11px;padding:3px 8px;border-radius:5px;background:#791F1F;color:#fff;border:none;cursor:pointer;font-weight:700;margin-left:6px';yes.textContent='✓ Oui';
-          yes.onclick=function(){DB.clubs[ci3].courts.splice(cj3,1);renderEditCourts(ci3);renderAdminClubs();};
-          var no=document.createElement('button');no.style.cssText='font-size:11px;padding:3px 7px;border-radius:5px;background:#2A3444;color:#aaa;border:none;cursor:pointer;margin-left:4px';no.textContent='Non';no.onclick=function(){cfRow.remove();};
-          cfRow.appendChild(yes);cfRow.appendChild(no);row.appendChild(cfRow);
-        };
-      })(ci2,cj);
-      main.appendChild(info);main.appendChild(tog);main.appendChild(del);row.appendChild(main);box.appendChild(row);
-    })(ci,j);
-  }
-}
-
-function saveClub(ci){
-  var c=DB.clubs[ci];
-  var f=document.getElementById('ep-from');var t=document.getElementById('ep-to');
-  if(f&&t){
-    var fr=Math.max(0,Math.min(23,parseInt(f.value)||7));
-    var to=Math.max(1,Math.min(24,parseInt(t.value)||23));
-    if(fr>=to){showMsg('Fermeture doit être après ouverture !');return;}
-    c.openFrom=fr;c.openTo=to;
-  }
-  var p6=document.getElementById('ep-60');if(p6)c.prices[60]=parseInt(p6.value)||0;
-  var p9=document.getElementById('ep-90');if(p9)c.prices[90]=parseInt(p9.value)||0;
-  var p12=document.getElementById('ep-120');if(p12)c.prices[120]=parseInt(p12.value)||0;
-  var mp=document.getElementById('ep-mach-p');if(mp)c.machinePrice=parseInt(mp.value)||0;
-  var mb=document.getElementById('ep-mach-b');if(mb)c.machineBalls=mb.value+' balles';
-  var d=document.getElementById('ep-desc');if(d)c.desc=d.value;
-  closeForm();renderAdminClubs();renderHomeClubs();showMsg('✅ Club mis à jour !');
-}
-
-function renderAdminCourts(){
-  var ci=parseInt(document.getElementById('court-sel').value);if(isNaN(ci))return;
-  var cl=DB.clubs[ci];
-  document.getElementById('courts-club-lbl').textContent=cl.name.split(' ').slice(0,2).join(' ');
-  var list=document.getElementById('courts-list');list.innerHTML='';
-  for(var j=0;j<cl.courts.length;j++){
-    (function(ci2,cj){
-      var ct=DB.clubs[ci2].courts[cj];
-      var row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:7px;padding:7px 8px;background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444';
-      var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div><div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
-      var badge=document.createElement('span');badge.className='aobadge '+(ct.open?'aob-g':'aob-r');badge.textContent=ct.open?'✓ Ouvert':'✗ Fermé';
-      var tog=document.createElement('div');tog.className='tog '+(ct.open?'on':'off');tog.style.marginLeft='5px';
-      (function(ci3,cj3,t,b){
-        t.onclick=function(){
-          DB.clubs[ci3].courts[cj3].open=!DB.clubs[ci3].courts[cj3].open;
-          var open=DB.clubs[ci3].courts[cj3].open;t.classList.toggle('on',open);t.classList.toggle('off',!open);
-          b.textContent=open?'✓ Ouvert':'✗ Fermé';b.className='aobadge '+(open?'aob-g':'aob-r');
-        };
-      })(ci2,cj,tog,badge);
-      row.appendChild(info);row.appendChild(badge);row.appendChild(tog);list.appendChild(row);
-    })(ci,j);
-  }
-  document.getElementById('prices-list').innerHTML=
-    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">Ouverture</div><div class="revam">'+cl.openFrom+'h00 - '+cl.openTo+'h00</div></div>'+
-    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h</div><div class="revam">'+cl.prices[60].toLocaleString()+' XAF</div></div>'+
-    '<div class="revrow"><div style="flex:1;font-size:12px;color:#aaa">1h30</div><div class="revam">'+cl.prices[90].toLocaleString()+' XAF</div></div>'+
-    '<div class="revrow" style="border:none"><div style="flex:1;font-size:12px;color:#aaa">2h</div><div class="revam">'+cl.prices[120].toLocaleString()+' XAF</div></div>';
-}
-
-function renderAdminProducts(){
-  var list=document.getElementById('products-list');list.innerHTML='';
-  for(var i=0;i<DB.products.length;i++){
-    (function(idx){
-      var p=DB.products[idx];
-      var row=document.createElement('div');row.className='prodrow';
-      var em=document.createElement('div');em.className='prodem';
-      if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:100%;object-fit:cover';em.appendChild(im);}else em.textContent=p.em;
-      var info=document.createElement('div');info.style.flex='1';
-      info.innerHTML='<div style="font-size:11px;font-weight:700;color:#fff">'+p.n+'</div><div style="font-size:10px;color:#4CD68A;margin-top:1px">'+p.p.toLocaleString()+' XAF</div>';
-      var acts=document.createElement('div');acts.style='display:flex;gap:4px';
-      var eb=document.createElement('button');eb.className='be';eb.textContent='✏️';eb.onclick=function(){oForm('edit-product',idx);};
-      var db=document.createElement('button');db.className='bd';db.textContent='✕';
-      db.onclick=function(){if(DB.products.length>1){DB.products.splice(idx,1);renderAdminProducts();renderShop();}else showMsg('Au moins 1 produit requis !');};
-      acts.appendChild(eb);acts.appendChild(db);row.appendChild(em);row.appendChild(info);row.appendChild(acts);list.appendChild(row);
-    })(i);
-  }
-  document.getElementById('prod-count').textContent=DB.products.length;
-}
-
-function renderAdminPubs(){
-  var list=document.getElementById('pubs-list');list.innerHTML='';
-  for(var i=0;i<DB.pubs.length;i++){
-    (function(idx){
-      var p=DB.pubs[idx];
-      var row=document.createElement('div');row.className='pubrow';
-      if(p.img){var im=document.createElement('img');im.src=p.img;im.style.cssText='width:100%;height:60px;object-fit:cover;border-radius:6px;margin-bottom:6px';im.onerror=function(){this.style.display='none';};row.appendChild(im);}
-      var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start';
-      var tb=p.t==='Magasin'?'aob-a':'aob-g';
-      top.innerHTML='<div><div style="font-size:12px;font-weight:700;color:#fff">'+p.n+'</div><div style="font-size:10px;color:#445;margin-top:1px">'+p.cl+' · '+p.p.toLocaleString()+' XAF/mois</div></div><span class="aobadge '+tb+'">'+p.t+'</span>';
-      var stats=document.createElement('div');stats.style='display:flex;gap:8px;margin-top:5px;align-items:center';
-      stats.innerHTML='<div style="font-size:10px;color:#aaa">👁 <span style="color:#4CD68A;font-weight:700">'+p.v+'</span></div><div style="font-size:10px;color:#aaa">🖱 <span style="color:#4CD68A;font-weight:700">'+p.ck+'</span></div>';
-      var db=document.createElement('button');db.className='bd';db.style.marginLeft='auto';db.textContent='Retirer';
-      db.onclick=function(){DB.pubs.splice(idx,1);renderAdminPubs();showMsg('✅ Pub retirée.');};
-      stats.appendChild(db);row.appendChild(top);row.appendChild(stats);list.appendChild(row);
-    })(i);
-  }
-  document.getElementById('pubs-count').textContent=DB.pubs.length;
-}
-
-function renderRevUnpaid(){
-  var list=document.getElementById('rev-unpaid-list');if(!list)return;list.innerHTML='';
-  var found=false;
-  for(var i=0;i<DB.clubs.length;i++){
-    (function(idx){
-      if(DB.clubs[idx].suspended){found=true;
-        var row=document.createElement('div');row.className='clubrow';
-        row.innerHTML='<div class="cdot" style="background:#E24B4A"></div><div class="cinfo"><div class="cname-a">'+DB.clubs[idx].name+'</div><div class="cmeta" style="color:#F09595">'+DB.clubs[idx].suspendedReason+'</div></div>';
-        var re=document.createElement('button');re.className='be';re.textContent='✓ Réactiver';
-        re.onclick=function(){DB.clubs[idx].suspended=false;DB.clubs[idx].suspendedReason='';renderAdminClubs();renderRevUnpaid();renderHomeClubs();cpInit();showMsg('✅ Réactivé !');};
-        row.appendChild(re);list.appendChild(row);
-      }
-    })(i);
-  }
-  if(!found)list.innerHTML='<div style="font-size:12px;color:#4CD68A;padding:6px;text-align:center">✓ Aucun impayé</div>';
-}
-
-function aTab(name,el){
-  var tabs=document.querySelectorAll('.atab');for(var i=0;i<tabs.length;i++)tabs[i].classList.remove('act');el.classList.add('act');
-  var secs=document.querySelectorAll('.asec');for(var i=0;i<secs.length;i++)secs[i].classList.remove('act');
-  document.getElementById('as-'+name).classList.add('act');
-  if(name==='clubs')   { renderAdminClubs(); }
-  if(name==='courts')  { renderAdminCourts(); }
-  if(name==='coaches') { buildCoachClubSelector(); renderAdminCoaches(); }
-  if(name==='shop')    { renderAdminProducts(); }
-  if(name==='pubs')    { renderAdminPubs(); }
-  if(name==='trn')     { renderAdminTournaments(); }
-  if(name==='rev')     { renderRevUnpaid(); }
-}
-
-// FORMS
-function oForm(type,idx){
-  if(type==='edit-club'){openEditClub(idx);return;}
-  var sh=document.getElementById('fsh'),h='';
-  if(type==='add-club'){
-    h='<div class="aft">🏢 Ajouter un club<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom du club</div><input class="afi" id="nc-nm" placeholder="Ex: Padel Arena LBV">'+
-      '<div class="afl">Localisation</div><input class="afi" id="nc-loc" placeholder="Ex: Libreville Centre">'+
-      '<div class="af2"><div><div class="afl">Ouverture (h)</div><input class="afi" type="number" id="nc-from" value="7" min="0" max="23"></div>'+
-        '<div><div class="afl">Fermeture (h)</div><input class="afi" type="number" id="nc-to" value="23" min="1" max="24"></div></div>'+
-      '<div class="af2"><div><div class="afl">Nbre courts</div><input class="afi" type="number" id="nc-ct" value="2" min="1"></div>'+
-        '<div><div class="afl">Abo/mois XAF</div><input class="afi" type="number" id="nc-ab" value="25000"></div></div>'+
-      '<div class="afl">Prix 1h (XAF)</div><input class="afi" type="number" id="nc-p60" value="5000">'+
-      '<div class="afl">Prix 1h30 (XAF)</div><input class="afi" type="number" id="nc-p90" value="7000">'+
-      '<div class="afl">Prix 2h (XAF)</div><input class="afi" type="number" id="nc-p120" value="9000">'+
-      '<button class="asub" onclick="addClub()">Ajouter le club</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-  }else if(type==='add-court'){
-    var ci=parseInt(document.getElementById('court-sel').value);
-    h='<div class="aft">🎾 Ajouter un court<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom du court</div><input class="afi" id="ac-nm" placeholder="Ex: Court 4">'+
-      '<div class="afl">Type</div><select class="afi" id="ac-type"><option>Intérieur</option><option>Extérieur</option></select>'+
-      '<button class="asub" onclick="addCourt('+ci+')">Ajouter</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-  }else if(type==='add-court-to'){
-    h='<div class="aft">🎾 Nouveau court<button class="afc" onclick="openEditClub('+idx+')">← Retour</button></div>'+
-      '<div class="afl">Nom du court</div><input class="afi" id="ac-nm" placeholder="Ex: Court 4">'+
-      '<div class="afl">Type</div><select class="afi" id="ac-type"><option>Intérieur</option><option>Extérieur</option></select>'+
-      '<button class="asub" onclick="addCourtTo('+idx+')">Ajouter</button>'+
-      '<button class="acan" onclick="openEditClub('+idx+')">Retour</button>';
-  }else if(type==='edit-prices'){
-    var ci=parseInt(document.getElementById('court-sel').value);var cl=DB.clubs[ci];
-    h='<div class="aft">✏️ Modifier prix &amp; horaires<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div style="font-size:12px;color:#aaa;margin-bottom:8px">'+cl.name+'</div>'+
-      '<div class="af2"><div><div class="afl">Ouverture (h)</div><input class="afi" type="number" id="mp-from" value="'+cl.openFrom+'" min="0" max="23"></div>'+
-        '<div><div class="afl">Fermeture (h)</div><input class="afi" type="number" id="mp-to" value="'+cl.openTo+'" min="1" max="24"></div></div>'+
-      '<div class="afl">1h (XAF)</div><input class="afi" type="number" id="mp-60" value="'+cl.prices[60]+'">'+
-      '<div class="afl">1h30 (XAF)</div><input class="afi" type="number" id="mp-90" value="'+cl.prices[90]+'">'+
-      '<div class="afl">2h (XAF)</div><input class="afi" type="number" id="mp-120" value="'+cl.prices[120]+'">'+
-      '<button class="asub" onclick="savePrices('+ci+')">💾 Enregistrer</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-  }else if(type==='add-product'){
-    h='<div class="aft">🛒 Ajouter produit<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom</div><input class="afi" id="np-nm" placeholder="Ex: Babolat Air Viper">'+
-      '<div class="afl">Marque</div><input class="afi" id="np-br" placeholder="Ex: Pro · Carbon">'+
-      '<div class="af2"><div><div class="afl">Prix (XAF)</div><input class="afi" type="number" id="np-p"></div>'+
-        '<div><div class="afl">Ancien prix</div><input class="afi" type="number" id="np-o"></div></div>'+
-      '<div class="afl">Emoji</div><input class="afi" id="np-em" value="🎾">'+
-      '<div class="afl">Photo produit</div>'+
-      '<div class="upload-zone" onclick="document.getElementById(&#39;np-file&#39;).click()">'+
-        '<div id="np-prev"><div style="font-size:20px">📷</div><div style="font-size:11px;color:#667;margin-top:2px">Choisir une photo</div></div>'+
-        '<input type="file" id="np-file" accept="image/*" style="display:none" onchange="prevImg(&apos;np-file&apos;,&apos;np-prev&apos;,&apos;np-data&apos;)">'+
-        '<input type="hidden" id="np-data"></div>'+
-      '<button class="asub" style="background:#7A5A0A" onclick="addProduct()">Ajouter</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-  }else if(type==='edit-product'){
-    var p=DB.products[idx];
-    h='<div class="aft">✏️ Modifier produit<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom</div><input class="afi" id="ep-nm" value="'+p.n+'">'+
-      '<div class="afl">Marque</div><input class="afi" id="ep-br" value="'+p.b+'">'+
-      '<div class="af2"><div><div class="afl">Prix</div><input class="afi" type="number" id="ep-p" value="'+p.p+'"></div>'+
-        '<div><div class="afl">Ancien prix</div><input class="afi" type="number" id="ep-o" value="'+p.o+'"></div></div>'+
-      '<div class="afl">Photo</div>'+
-      '<div class="upload-zone" onclick="document.getElementById(&#39;ep-file&#39;).click()">'+
-        '<div id="ep-prev">'+(p.img?'<img src="'+p.img+'" style="width:70px;height:50px;object-fit:cover;border-radius:5px">':'<div style="font-size:20px">📷</div><div style="font-size:11px;color:#667;margin-top:2px">Changer la photo</div>')+'</div>'+
-        '<input type="file" id="ep-file" accept="image/*" style="display:none" onchange="prevImg(&apos;ep-file&apos;,&apos;ep-prev&apos;,&apos;ep-data&apos;)">'+
-        '<input type="hidden" id="ep-data" value="'+(p.img||'')+'"></div>'+
-      '<button class="asub" onclick="saveProd('+idx+')">💾 Enregistrer</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-  }else if(type==='add-trn'){
-    h='<div class="aft">🏆 Créer un tournoi<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom du tournoi</div><input class="afi" id="nt-nm" placeholder="Ex: Open de Libreville 2026">'+
-      '<div class="afl">Club organisateur</div><input class="afi" id="nt-club" placeholder="Ex: Padel Arena">'+
-      '<div class="afl">Date</div><input class="afi" id="nt-date" placeholder="Ex: 14-15 juin">'+
-      '<div class="af2">'+
-        '<div><div class="afl">Nbre max joueurs</div><input class="afi" type="number" id="nt-max" value="32"></div>'+
-        '<div><div class="afl">Prix inscription (XAF)</div><input class="afi" type="number" id="nt-prix" value="5000"></div>'+
-      '</div>'+
-      '<div class="afl">Type</div><select class="afi" id="nt-type"><option>Mixte</option><option>Simple</option><option>Doubles</option></select>'+
-      '<button class="asub" onclick="addTournament()">➕ Créer le tournoi</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-
-  }else if(type==='edit-trn'){
-    var t=DB.tournaments[idx];
-    h='<div class="aft">✏️ Modifier tournoi<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Nom</div><input class="afi" id="nt-nm" value="'+t.name+'">'+
-      '<div class="afl">Club</div><input class="afi" id="nt-club" value="'+t.club+'">'+
-      '<div class="afl">Date</div><input class="afi" id="nt-date" value="'+t.date+'">'+
-      '<div class="af2">'+
-        '<div><div class="afl">Max joueurs</div><input class="afi" type="number" id="nt-max" value="'+t.max+'"></div>'+
-        '<div><div class="afl">Prix (XAF)</div><input class="afi" type="number" id="nt-prix" value="'+t.prix+'"></div>'+
-      '</div>'+
-      '<div class="afl">Type</div><select class="afi" id="nt-type">'+
-        ['Mixte','Simple','Doubles'].map(function(x){return '<option'+(x===t.type?' selected':'')+'>'+x+'</option>';}).join('')+
-      '</select>'+
-      '<button class="asub" onclick="saveTournament('+idx+')">💾 Enregistrer</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-
-  }else if(type==='add-coach'){
-    var ci=parseInt(document.getElementById('coach-club-sel').value);
-    var cl=DB.clubs[ci];
-    // Build court options
-    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+c.name+'">'+c.name+'</option>';}).join('');
-    h='<div class="aft">🎓 Ajouter un coach<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div style="font-size:11px;color:#4CD68A;margin-bottom:8px">'+cl.name+'</div>'+
-      '<div class="afl">Nom complet</div><input class="afi" id="ac-name" placeholder="Ex: Marco Silva">'+
-      '<div class="afl">Initiales (2 lettres)</div><input class="afi" id="ac-init" placeholder="Ex: MS" maxlength="2">'+
-      '<div class="afl">Court assigné</div><select class="afi" id="ac-court">'+courtOpts+'</select>'+
-      '<div class="afl">Niveau / Description</div><input class="afi" id="ac-level" placeholder="Ex: Pro · 5 ans expérience">'+
-      '<div class="afl">Prix par heure</div><input class="afi" id="ac-price" placeholder="Ex: 15 000 XAF/h">'+
-      '<div class="afl">Créneaux disponibles (séparés par virgule)</div><input class="afi" id="ac-slots" placeholder="Ex: 09h, 10h, 14h, 16h">'+
-      '<button class="asub" onclick="addCoach('+ci+')">➕ Ajouter ce coach</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-
-  }else if(type==='edit-coach'){
-    var ci=idx.ci, cj=idx.cj;
-    var cl=DB.clubs[ci], coach=cl.coaches[cj];
-    var courtOpts=cl.courts.map(function(c,i){return '<option value="'+c.name+'"'+(c.name===coach.court?' selected':'')+'>'+c.name+'</option>';}).join('');
-    h='<div class="aft">✏️ Modifier coach<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div style="font-size:11px;color:#4CD68A;margin-bottom:8px">'+cl.name+'</div>'+
-      '<div class="afl">Nom complet</div><input class="afi" id="ac-name" value="'+coach.n+'">'+
-      '<div class="afl">Initiales</div><input class="afi" id="ac-init" value="'+coach.init+'" maxlength="2">'+
-      '<div class="afl">Court assigné</div><select class="afi" id="ac-court">'+courtOpts+'</select>'+
-      '<div class="afl">Niveau / Description</div><input class="afi" id="ac-level" value="'+coach.level+'">'+
-      '<div class="afl">Prix par heure</div><input class="afi" id="ac-price" value="'+coach.price+'">'+
-      '<div class="afl">Créneaux (séparés par virgule)</div><input class="afi" id="ac-slots" value="'+coach.slots.join(', ')+'">'+
-      '<button class="asub" onclick="saveCoach('+ci+','+cj+')">💾 Enregistrer</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-
-  }else if(type==='add-pub'){
-    h='<div class="aft">📢 Créer une pub<button class="afc" onclick="closeForm()">✕</button></div>'+
-      '<div class="afl">Titre</div><input class="afi" id="pp-t" placeholder="Ex: SportShop — Flash -30%">'+
-      '<div class="afl">Client</div><input class="afi" id="pp-cl" placeholder="Ex: SportShop LBV">'+
-      '<div class="af2"><div><div class="afl">Type</div><select class="afi" id="pp-type"><option>Club</option><option>Magasin</option><option>Tournoi</option></select></div>'+
-        '<div><div class="afl">Prix/mois (XAF)</div><input class="afi" type="number" id="pp-p" value="30000"></div></div>'+
-      '<div class="afl">Photo pub</div>'+
-      '<div class="upload-zone" onclick="document.getElementById(&#39;pp-file&#39;).click()">'+
-        '<div id="pp-prev"><div style="font-size:20px">🖼️</div><div style="font-size:11px;color:#667;margin-top:2px">Ajouter une photo</div></div>'+
-        '<input type="file" id="pp-file" accept="image/*" style="display:none" onchange="prevImg(&apos;pp-file&apos;,&apos;pp-prev&apos;,&apos;pp-data&apos;)">'+
-        '<input type="hidden" id="pp-data"></div>'+
-      '<button class="asub" onclick="addPub()">Activer</button>'+
-      '<button class="acan" onclick="closeForm()">Annuler</button>';
-  }
-  sh.innerHTML=h;document.getElementById('fov').classList.add('open');
-}
-
-function prevImg(fi,pi,di){
-  var file=document.getElementById(fi).files[0];if(!file)return;
-  var reader=new FileReader();
-  reader.onload=function(e){
-    var b64=e.target.result;document.getElementById(di).value=b64;
-    document.getElementById(pi).innerHTML='<img src="'+b64+'" style="width:100%;max-height:70px;object-fit:cover;border-radius:6px"><div style="font-size:10px;color:#4CD68A;margin-top:3px">✓ Photo chargée</div>';
-  };reader.readAsDataURL(file);
-}
-
-function addClub(){
-  var nm=document.getElementById('nc-nm').value.trim();if(!nm){showMsg('Remplis le nom !');return;}
-  var fr=Math.max(0,Math.min(23,parseInt(document.getElementById('nc-from').value)||7));
-  var to=Math.max(1,Math.min(24,parseInt(document.getElementById('nc-to').value)||23));
-  if(fr>=to){showMsg('Fermeture doit être après ouverture !');return;}
-  var ct=Math.max(1,parseInt(document.getElementById('nc-ct').value)||2);
-  var courts=[];for(var i=0;i<ct;i++)courts.push({name:'Court '+(i+1),type:'Extérieur',open:true});
-  DB.clubs.push({name:nm,loc:document.getElementById('nc-loc').value||'Libreville',openFrom:fr,openTo:to,
-    prices:{60:parseInt(document.getElementById('nc-p60').value)||5000,90:parseInt(document.getElementById('nc-p90').value)||7000,120:parseInt(document.getElementById('nc-p120').value)||9000},
-    hasMachine:false,machinePrice:0,machineBalls:'',desc:'',extras:[{n:'Eau',p:500}],courts:courts,coaches:[]});
-  closeForm();renderAdminClubs();renderHomeClubs();cpInit();showMsg('✅ '+nm+' ajouté avec '+ct+' courts !');
-}
-function addCourt(ci){
-  var nm=document.getElementById('ac-nm').value.trim();if(!nm){showMsg('Remplis le nom !');return;}
-  DB.clubs[ci].courts.push({name:nm,type:document.getElementById('ac-type').value,open:true});
-  closeForm();renderAdminCourts();showMsg('✅ Court ajouté !');
-}
-function addCourtTo(ci){
-  var nm=document.getElementById('ac-nm').value.trim();if(!nm){showMsg('Remplis le nom !');return;}
-  DB.clubs[ci].courts.push({name:nm,type:document.getElementById('ac-type').value,open:true});
-  renderAdminClubs();openEditClub(ci);
-}
-function savePrices(ci){
-  var fr=parseInt(document.getElementById('mp-from').value)||7;
-  var to=parseInt(document.getElementById('mp-to').value)||23;
-  if(fr>=to){showMsg('Fermeture doit être après ouverture !');return;}
-  DB.clubs[ci].openFrom=fr;DB.clubs[ci].openTo=to;
-  DB.clubs[ci].prices[60]=parseInt(document.getElementById('mp-60').value)||0;
-  DB.clubs[ci].prices[90]=parseInt(document.getElementById('mp-90').value)||0;
-  DB.clubs[ci].prices[120]=parseInt(document.getElementById('mp-120').value)||0;
-  closeForm();renderAdminCourts();renderHomeClubs();showMsg('✅ Mis à jour !');
-}
-function addProduct(){
-  var nm=document.getElementById('np-nm').value.trim();if(!nm){showMsg('Remplis le nom !');return;}
-  DB.products.push({em:document.getElementById('np-em').value||'🎾',n:nm,b:document.getElementById('np-br').value,
-    p:parseInt(document.getElementById('np-p').value)||0,o:parseInt(document.getElementById('np-o').value)||0,
-    img:document.getElementById('np-data').value});
-  closeForm();renderAdminProducts();showMsg('✅ Produit ajouté !');
-}
-function saveProd(idx){
-  var img=document.getElementById('ep-data').value;
-  DB.products[idx].n=document.getElementById('ep-nm').value;DB.products[idx].b=document.getElementById('ep-br').value;
-  DB.products[idx].p=parseInt(document.getElementById('ep-p').value)||0;DB.products[idx].o=parseInt(document.getElementById('ep-o').value)||0;
-  if(img)DB.products[idx].img=img;closeForm();renderAdminProducts();
-}
-function addTournament(){
-  var nm=document.getElementById('nt-nm').value.trim();
-  if(!nm){showMsg('Remplis le nom !');return;}
-  DB.tournaments.push({
-    name:nm,
-    club:document.getElementById('nt-club').value||'Padel Arena',
-    date:document.getElementById('nt-date').value||'À définir',
-    max:parseInt(document.getElementById('nt-max').value)||32,
-    inscrits:0,
-    prix:parseInt(document.getElementById('nt-prix').value)||5000,
-    type:document.getElementById('nt-type').value||'Mixte',
-    status:'soon'
-  });
-  closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('✅ Tournoi créé !');
-}
-
-function saveTournament(idx){
-  DB.tournaments[idx].name=document.getElementById('nt-nm').value;
-  DB.tournaments[idx].club=document.getElementById('nt-club').value;
-  DB.tournaments[idx].date=document.getElementById('nt-date').value;
-  DB.tournaments[idx].max=parseInt(document.getElementById('nt-max').value)||32;
-  DB.tournaments[idx].prix=parseInt(document.getElementById('nt-prix').value)||5000;
-  DB.tournaments[idx].type=document.getElementById('nt-type').value;
-  closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('✅ Tournoi mis à jour !');
-}
-
-function addCoach(ci){
-  var nm=document.getElementById('ac-name').value.trim();
-  if(!nm){showMsg('Remplis le nom !');return;}
-  var init=document.getElementById('ac-init').value.trim().toUpperCase()||nm.split(' ').map(function(w){return w[0];}).join('').substring(0,2);
-  var slots=document.getElementById('ac-slots').value.split(',').map(function(s){return s.trim();}).filter(function(s){return s;});
-  if(!slots.length)slots=['09h','14h'];
-  var colors=[['#E6F1FB','#0C447C'],['#E1F5EE','#085041'],['#FAEEDA','#412402'],['#EEEDFE','#3C3489'],['#FCEBEB','#791F1F']];
-  var col=colors[DB.clubs[ci].coaches.length%colors.length];
-  DB.clubs[ci].coaches.push({
-    n:nm, init:init, bg:col[0], tc:col[1],
-    court:document.getElementById('ac-court').value,
-    level:document.getElementById('ac-level').value||'Tous niveaux',
-    price:document.getElementById('ac-price').value||'10 000 XAF/h',
-    slots:slots
-  });
-  closeForm(); renderAdminCoaches(); buildCoachClubSelector(); showMsg('✅ Coach ajouté !');
-}
-
-function saveCoach(ci,cj){
-  var nm=document.getElementById('ac-name').value.trim();
-  if(!nm){showMsg('Remplis le nom !');return;}
-  var slots=document.getElementById('ac-slots').value.split(',').map(function(s){return s.trim();}).filter(function(s){return s;});
-  if(!slots.length)slots=['09h','14h'];
-  DB.clubs[ci].coaches[cj].n=nm;
-  DB.clubs[ci].coaches[cj].init=document.getElementById('ac-init').value.trim().toUpperCase()||nm.substring(0,2).toUpperCase();
-  DB.clubs[ci].coaches[cj].court=document.getElementById('ac-court').value;
-  DB.clubs[ci].coaches[cj].level=document.getElementById('ac-level').value;
-  DB.clubs[ci].coaches[cj].price=document.getElementById('ac-price').value;
-  DB.clubs[ci].coaches[cj].slots=slots;
-  closeForm(); renderAdminCoaches(); showMsg('✅ Coach mis à jour !');
-}
-
-function addPub(){
-  var t=document.getElementById('pp-t').value.trim(),cl=document.getElementById('pp-cl').value.trim();
-  if(!t||!cl){showMsg('Remplis tous les champs !');return;}
-  DB.pubs.push({n:t,cl:cl,t:document.getElementById('pp-type').value,v:0,ck:0,p:parseInt(document.getElementById('pp-p').value)||30000,img:document.getElementById('pp-data').value});
-  closeForm();renderAdminPubs();showMsg('✅ Pub activée !');
-}
-function closeForm(){document.getElementById('fov').classList.remove('open');}
-function closeFovClick(e){if(e.target===document.getElementById('fov'))closeForm();}
-
-// TIMER
-var ts=14*60+32;
-setInterval(function(){
-  ts=Math.max(0,ts-1);var m=Math.floor(ts/60),s=ts%60;
-  var el=document.getElementById('shop-timer');if(el)el.textContent=(m<10?'0'+m:m)+':'+(s<10?'0'+s:s);
-},1000);
-
-
-// ============================================================
-// CLUB PANEL
-// ============================================================
-var cpCI = -1; // current club index for panel
-var cpManualBlocks = {}; // key: same as DB.reservations, value: {name, ci, coi, dk, sm, em}
-
-function cpInit(){
-  // If logged in club was deleted or suspended, force logout
-  if(cpCI >= 0){
-    if(cpCI >= DB.clubs.length || DB.clubs[cpCI].suspended){
-      cpCI = -1;
-      document.getElementById('club-panel-login').style.display='block';
-      document.getElementById('club-panel-dash').style.display='none';
-      showMsg('⚠️ Accès club révoqué.');
-    }
-  }
-  // Populate club selector with active clubs only
-  var sel = document.getElementById('cp-club-select');
-  var prevVal = sel.value;
-  sel.innerHTML = '';
-  for(var i=0;i<DB.clubs.length;i++){
-    if(DB.clubs[i].suspended) continue;
-    var opt = document.createElement('option');
-    opt.value = i;
-    opt.textContent = DB.clubs[i].name;
-    sel.appendChild(opt);
-  }
-  // Restore selection if still valid
-  if(prevVal) sel.value = prevVal;
-}
-
-function cpLogin(){
-  var idx = parseInt(document.getElementById('cp-club-select').value);
-  var code = document.getElementById('cp-code').value.trim();
-  if(!code){ showMsg('Entre le code !'); return; }
-  if(code !== '1234'){ showMsg('Code incorrect !'); return; }
-  cpCI = idx;
-  document.getElementById('club-panel-login').style.display = 'none';
-  document.getElementById('club-panel-dash').style.display = 'block';
-  cpLoadDash();
-}
-
-function cpLogout(){
-  cpCI = -1;
-  document.getElementById('cp-code').value = '';
-  document.getElementById('club-panel-login').style.display = 'block';
-  document.getElementById('club-panel-dash').style.display = 'none';
-}
-
-function cpLoadDash(){
-  var cl = DB.clubs[cpCI];
-  document.getElementById('cp-club-name').textContent = cl.name;
-  document.getElementById('cp-club-loc').textContent = '📍 '+cl.loc+' · '+cl.openFrom+'h00-'+cl.openTo+'h00';
-  document.getElementById('cp-stat-courts').textContent = cl.courts.length;
-
-  // Set today's date as default for filters
-  var today = new Date();
-  var todayKey = padZ(today.getFullYear())+'-'+padZ(today.getMonth()+1)+'-'+padZ(today.getDate());
-  document.getElementById('cp-filter-date').value = todayKey;
-  document.getElementById('cp-block-date').value = todayKey;
-
-  // Populate court filters
-  var filterSel = document.getElementById('cp-filter-court');
-  filterSel.innerHTML = '<option value="all">Tous les courts</option>';
-  var blockSel = document.getElementById('cp-block-court');
-  blockSel.innerHTML = '';
-  for(var j=0;j<cl.courts.length;j++){
-    var opt1 = document.createElement('option'); opt1.value=j; opt1.textContent=cl.courts[j].name; filterSel.appendChild(opt1);
-    var opt2 = document.createElement('option'); opt2.value=j; opt2.textContent=cl.courts[j].name; blockSel.appendChild(opt2);
-  }
-
-  // Populate start hours
-  cpBuildStartHours();
-
-  cpRenderResa();
-  cpRenderBlocked();
-  cpRenderCourts();
-}
-
-function cpBuildStartHours(){
-  var cl = DB.clubs[cpCI];
-  var sel = document.getElementById('cp-block-start');
-  sel.innerHTML = '';
-  for(var h=cl.openFrom;h<cl.openTo;h++){
-    for(var m=0;m<60;m+=30){
-      var val = h*60+m;
-      var opt = document.createElement('option'); opt.value=val; opt.textContent=tStr(val); sel.appendChild(opt);
-    }
-  }
-}
-
-function cpTab(name, el){
-  document.querySelectorAll('.cptab').forEach(function(t){
-    t.style.background='transparent'; t.style.color='#444';
-  });
-  el.style.background='#1A7A4A'; el.style.color='#fff';
-  ['resa','notifs','block','courts'].forEach(function(s){
-    var sec=document.getElementById('cp-sec-'+s);
-    if(sec) sec.style.display='none';
-  });
-  var target=document.getElementById('cp-sec-'+name);
-  if(target) target.style.display='flex';
-  if(name==='block') cpRenderBlocked();
-  if(name==='courts') cpRenderCourts();
-  if(name==='notifs') cpRenderNotifs();
-  if(name==='notifs') cpRenderNotifs();
-}
-
-// RENDER RESERVATIONS
-function cpRenderResa(){
-  if(cpCI<0) return;
-  var cl = DB.clubs[cpCI];
-  var list = document.getElementById('cp-resa-list');
-  list.innerHTML = '';
-  var filterCourt = document.getElementById('cp-filter-court').value;
-  var filterDate = document.getElementById('cp-filter-date').value;
-  var count = 0; var todayCount = 0;
-  var todayKey = padZ(new Date().getFullYear())+'-'+padZ(new Date().getMonth()+1)+'-'+padZ(new Date().getDate());
-
-  var grouped = [];
-
-  // FROM DB.reservations (app bookings only - skip manual blocks)
-  // Key format: "ci-coi-YYYY-MM-DD-startMin"
-  // Find start of each booking: a slot is START if previous slot not reserved
-  for(var key in DB.reservations){
-    // Skip manual blocks - handled separately
-    if(cpManualBlocks[key]) continue;
-    var parts = key.split('-');
-    if(parts.length < 6) continue;
-    var ci2 = parseInt(parts[0]);
-    if(ci2 !== cpCI) continue;
-    var coi = parseInt(parts[1]);
-    var dk = parts[2]+'-'+parts[3]+'-'+parts[4];
-    var sm = parseInt(parts[5]);
-    // Skip if previous slot also reserved (not the start)
-    var prevKey = ci2+'-'+coi+'-'+dk+'-'+(sm-30);
-    if(DB.reservations[prevKey] && !cpManualBlocks[prevKey]) continue;
-    // This IS the start - find end time
-    var em = sm+30;
-    while(DB.reservations[ci2+'-'+coi+'-'+dk+'-'+em] && !cpManualBlocks[ci2+'-'+coi+'-'+dk+'-'+em]) em+=30;
-    grouped.push({coi:coi, dk:dk, sm:sm, em:em, type:'app', name:'Client app'});
-  }
-
-  // FROM manual blocks - only show unique bookings (by sm)
-  var seenManual = {};
-  for(var key2 in cpManualBlocks){
-    var b = cpManualBlocks[key2];
-    if(b.ci !== cpCI) continue;
-    var mk = b.coi+'-'+b.dk+'-'+b.sm;
-    if(seenManual[mk]) continue;
-    seenManual[mk] = true;
-    grouped.push({coi:b.coi, dk:b.dk, sm:b.sm, em:b.em, type:'manual', name:b.name||'Téléphone'});
-  }
-
-  // Sort by date then time
-  grouped.sort(function(a,b){
-    if(a.dk !== b.dk) return a.dk < b.dk ? -1 : 1;
-    return a.sm - b.sm;
-  });
-
-  // Filter and display
-  grouped.forEach(function(r){
-    // Apply filters
-    if(filterCourt !== 'all' && r.coi !== parseInt(filterCourt)) return;
-    if(filterDate && r.dk !== filterDate) return;
-    if(r.dk === todayKey) todayCount++;
-    count++;
-
-    var court = cl.courts[r.coi];
-    if(!court) return;
-    var card = document.createElement('div');
-    card.style.cssText='background:#0F1520;border-radius:9px;padding:9px;border:1px solid #2A3444';
-    
-    var typeColor = r.type==='manual'?'#FAEEDA':'#E6F1FB';
-    var typeTextColor = r.type==='manual'?'#633806':'#0C447C';
-    var typeLabel = r.type==='manual'?'📞 Tél.':'📱 App';
-
-    card.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start">'+
-      '<div>'+
-        '<div style="font-size:12px;font-weight:700;color:#fff">'+court.name+'</div>'+
-        '<div style="font-size:11px;color:#4CD68A;margin-top:2px">'+tStr(r.sm)+' → '+tStr(r.em)+'</div>'+
-        '<div style="font-size:10px;color:#667;margin-top:1px">'+fmtDK(r.dk)+'</div>'+
-        '<div style="font-size:10px;color:#aaa;margin-top:2px">'+r.name+'</div>'+
-      '</div>'+
-      '<span style="font-size:9px;padding:2px 6px;border-radius:4px;font-weight:700;background:'+typeColor+';color:'+typeTextColor+'">'+typeLabel+'</span>'+
-    '</div>';
-    list.appendChild(card);
-  });
-
-  if(count === 0){
-    list.innerHTML='<div style="font-size:12px;color:#445;text-align:center;padding:12px;border:1px dashed #2A3444;border-radius:8px">Aucune réservation pour ce filtre</div>';
-  }
-
-  document.getElementById('cp-stat-resa').textContent = count;
-  document.getElementById('cp-stat-today').textContent = todayCount;
-}
-
-// BLOCK A SLOT MANUALLY
-function cpBlockSlot(){
-  if(cpCI<0) return;
-  var coi = parseInt(document.getElementById('cp-block-court').value);
-  var dk = document.getElementById('cp-block-date').value;
-  var sm = parseInt(document.getElementById('cp-block-start').value); // minutes from midnight
-  var dur = parseInt(document.getElementById('cp-block-dur').value);  // duration in minutes
-  var name = document.getElementById('cp-block-name').value.trim() || 'Réservé par téléphone';
-  if(!dk){ showMsg('Choisis une date !'); return; }
-  if(isNaN(sm) || isNaN(dur)){ showMsg('Sélectionne une heure et une durée !'); return; }
-  var em = sm + dur; // end time in minutes
-  var numSlots = dur / 30; // number of 30-min blocks to block
-  // Check if any slot in range is already taken
-  var alreadyTaken = false;
-  for(var s=0; s<numSlots; s++){
-    if(DB.reservations[rk(cpCI, coi, dk, sm+(s*30))]){
-      alreadyTaken = true; break;
-    }
-  }
-  if(alreadyTaken){
-    showMsg('⚠️ '+tStr(sm)+' déjà réservé sur ce court !');
-    return;
-  }
-  // Block exactly the right slots
-  // e.g. 7h00 for 1h30: block 420, 450, 480
-  for(var s=0; s<numSlots; s++){
-    var slotMin = sm + (s*30);
-    var key = rk(cpCI, coi, dk, slotMin);
-    DB.reservations[key] = true;
-    cpManualBlocks[key] = {ci:cpCI, coi:coi, dk:dk, sm:sm, em:em, name:name};
-  }
-  document.getElementById('cp-block-name').value = '';
-  cpRenderBlocked();
-  cpRenderResa();
-  showMsg('✅ '+tStr(sm)+' → '+tStr(em)+' bloqué pour '+name+' !');
-}
-
-// RENDER BLOCKED LIST
-function cpRenderBlocked(){
-  if(cpCI<0) return;
-  var cl = DB.clubs[cpCI];
-  var list = document.getElementById('cp-blocked-list');
-  list.innerHTML = '';
-  var seen = {};
-  var found = false;
-  for(var key in cpManualBlocks){
-    var b = cpManualBlocks[key];
-    if(b.ci !== cpCI) continue;
-    var groupKey = b.coi+'-'+b.dk+'-'+b.sm;
-    if(seen[groupKey]) continue;
-    seen[groupKey] = true;
-    found = true;
-    var court = cl.courts[b.coi];
-    if(!court) continue;
-    var row = document.createElement('div');
-    row.style.cssText='display:flex;align-items:center;gap:7px;padding:7px;background:#0F1520;border-radius:7px;margin-bottom:4px;border:1px solid #2A3444';
-    var info = document.createElement('div'); info.style.flex='1';
-    info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+court.name+' · '+tStr(b.sm)+'</div>'+
-      '<div style="font-size:10px;color:#4CD68A;margin-top:1px">'+fmtDK(b.dk)+'</div>'+
-      '<div style="font-size:10px;color:#aaa">📞 '+b.name+'</div>';
-    var unblockBtn = document.createElement('button');
-    unblockBtn.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FAEEDA;color:#633806;border:none;cursor:pointer;font-weight:700';
-    unblockBtn.textContent='🔓 Libérer';
-    (function(bKey, bData){
-      unblockBtn.onclick=function(){
-        // Remove from DB.reservations and cpManualBlocks
-        var ns = (bData.em-bData.sm)/30;
-        for(var s=0;s<ns;s++){
-          var k = rk(bData.ci,bData.coi,bData.dk,bData.sm+(s*30));
-          delete DB.reservations[k];
-          delete cpManualBlocks[k];
-        }
-        cpRenderBlocked();
-        cpRenderResa();
-        showMsg('✅ Créneau libéré !');
-      };
-    })(key, b);
-    row.appendChild(info); row.appendChild(unblockBtn);
-    list.appendChild(row);
-  }
-  if(!found){
-    list.innerHTML='<div style="font-size:12px;color:#445;text-align:center;padding:8px">Aucun créneau bloqué manuellement</div>';
-  }
-}
-
-// RENDER COURTS STATUS
-function cpRenderCourts(){
-  if(cpCI<0) return;
-  var cl = DB.clubs[cpCI];
-  var list = document.getElementById('cp-courts-list');
-  list.innerHTML = '';
-  for(var j=0;j<cl.courts.length;j++){
-    (function(cj){
-      var ct = cl.courts[cj];
-      var row = document.createElement('div');
-      row.style.cssText='display:flex;align-items:center;gap:7px;padding:8px;background:#0F1520;border-radius:8px;margin-bottom:5px;border:1px solid #2A3444';
-      var info = document.createElement('div'); info.style.flex='1';
-      info.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+ct.name+'</div>'+
-        '<div style="font-size:10px;color:#445">'+(ct.type==='Intérieur'?'🏠':'☀️')+' '+ct.type+'</div>';
-      var badge = document.createElement('span');
-      badge.className='aobadge '+(ct.open?'aob-g':'aob-r');
-      badge.textContent = ct.open?'✓ Ouvert':'✗ Fermé';
-      var tog = document.createElement('div'); tog.className='tog '+(ct.open?'on':'off'); tog.style.marginLeft='5px';
-      (function(cj2,t,b){
-        t.onclick=function(){
-          DB.clubs[cpCI].courts[cj2].open=!DB.clubs[cpCI].courts[cj2].open;
-          var open=DB.clubs[cpCI].courts[cj2].open;
-          t.classList.toggle('on',open); t.classList.toggle('off',!open);
-          b.textContent=open?'✓ Ouvert':'✗ Fermé';
-          b.className='aobadge '+(open?'aob-g':'aob-r');
-          showMsg(open?'✅ Court ouvert !':'⚠️ Court fermé !');
-        };
-      })(cj,tog,badge);
-      row.appendChild(info); row.appendChild(badge); row.appendChild(tog);
-      list.appendChild(row);
-    })(j);
-  }
-}
-
-
-// ============================================================
-// ADMIN COACHES
-// ============================================================
-function buildCoachClubSelector(){
-  var sel = document.getElementById('coach-club-sel');
-  if(!sel) return;
-  sel.innerHTML = '';
-  for(var i=0;i<DB.clubs.length;i++){
-    if(DB.clubs[i].suspended) continue;
-    var opt = document.createElement('option');
-    opt.value = i;
-    opt.textContent = DB.clubs[i].name+' ('+DB.clubs[i].coaches.length+' coachs)';
-    sel.appendChild(opt);
-  }
-}
-
-function renderAdminCoaches(){
-  var sel = document.getElementById('coach-club-sel');
-  if(!sel) return;
-  var ci = parseInt(sel.value);
-  if(isNaN(ci)) return;
-  var cl = DB.clubs[ci];
-  var list = document.getElementById('coaches-admin-list');
-  list.innerHTML = '';
-  document.getElementById('coaches-count').textContent = cl.coaches.length;
-
-  if(!cl.coaches.length){
-    list.innerHTML = '<div style="font-size:12px;color:#445;text-align:center;padding:10px;border:1px dashed #2A3444;border-radius:7px">Aucun coach — ajoute un coach ci-dessous</div>';
-    return;
-  }
-
-  for(var j=0;j<cl.coaches.length;j++){
-    (function(ci2, cj){
-      var coach = DB.clubs[ci2].coaches[cj];
-      var row = document.createElement('div');
-      row.style.cssText = 'background:#0F1520;border-radius:9px;margin-bottom:5px;border:1px solid #2A3444;overflow:hidden';
-
-      var main = document.createElement('div');
-      main.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 9px';
-
-      // Avatar
-      var av = document.createElement('div');
-      av.style.cssText = 'width:34px;height:34px;border-radius:50%;background:'+coach.bg+';color:'+coach.tc+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0';
-      av.textContent = coach.init;
-
-      var info = document.createElement('div'); info.style.flex='1';
-      info.innerHTML = '<div style="font-size:12px;font-weight:700;color:#fff">'+coach.n+'</div>'+
-        '<div style="font-size:10px;color:#4CD68A;margin-top:1px">'+coach.price+'</div>'+
-        '<div style="font-size:10px;color:#445;margin-top:1px">📍 '+coach.court+' · '+coach.level+'</div>'+
-        '<div style="font-size:10px;color:#445">🕐 '+coach.slots.join(' · ')+'</div>';
-
-      var acts = document.createElement('div'); acts.style='display:flex;flex-direction:column;gap:3px';
-
-      var editBtn = document.createElement('button');
-      editBtn.className='be'; editBtn.textContent='✏️ Modifier';
-      (function(ci3,cj3){ editBtn.onclick=function(){ oForm('edit-coach',{ci:ci3,cj:cj3}); }; })(ci2,cj);
-
-      var delBtn = document.createElement('button');
-      delBtn.className='bd'; delBtn.textContent='🗑 Retirer';
-      (function(ci3,cj3){
-        delBtn.onclick=function(){
-          // Inline confirm
-          var cf = row.querySelector('.iconfirm');
-          if(cf){ cf.remove(); return; }
-          var cfRow = document.createElement('div'); cfRow.className='iconfirm';
-          cfRow.innerHTML='<span style="font-size:11px;color:#F09595;flex:1">Retirer '+DB.clubs[ci3].coaches[cj3].n+' ?</span>';
-          var yes = document.createElement('button');
-          yes.style.cssText='font-size:11px;padding:3px 8px;border-radius:5px;background:#791F1F;color:#fff;border:none;cursor:pointer;font-weight:700;margin-left:6px';
-          yes.textContent='✓ Oui';
-          yes.onclick=function(){ DB.clubs[ci3].coaches.splice(cj3,1); renderAdminCoaches(); buildCoachClubSelector(); showMsg('✅ Coach retiré !'); };
-          var no = document.createElement('button');
-          no.style.cssText='font-size:11px;padding:3px 7px;border-radius:5px;background:#2A3444;color:#aaa;border:none;cursor:pointer;margin-left:4px';
-          no.textContent='Non'; no.onclick=function(){ cfRow.remove(); };
-          cfRow.appendChild(yes); cfRow.appendChild(no);
-          row.appendChild(cfRow);
-        };
-      })(ci2,cj);
-
-      acts.appendChild(editBtn); acts.appendChild(delBtn);
-      main.appendChild(av); main.appendChild(info); main.appendChild(acts);
-      row.appendChild(main);
-      list.appendChild(row);
-    })(ci, j);
-  }
-}
-
-
-
-
-
-// ============================================================
-// TOURNAMENTS ADMIN
-// ============================================================
-function renderAdminTournaments(){
-  var list=document.getElementById('trn-admin-list');
-  if(!list)return;
-  list.innerHTML='';
-  document.getElementById('trn-count').textContent=DB.tournaments.length;
-  if(!DB.tournaments.length){
-    list.innerHTML='<div style="font-size:12px;color:#445;text-align:center;padding:10px;border:1px dashed #2A3444;border-radius:7px">Aucun tournoi</div>';
-    return;
-  }
-  DB.tournaments.forEach(function(t,i){
-    (function(idx){
-      var row=document.createElement('div');
-      row.style.cssText='background:#0F1520;border-radius:9px;margin-bottom:5px;border:1px solid #2A3444;overflow:hidden;padding:9px';
-      var sc=t.status==='open'?'aob-g':t.status==='full'?'aob-r':'aob-a';
-      var sl=t.status==='open'?'Ouvert':t.status==='full'?'Complet':'Bientot';
-      var pct=Math.round((t.inscrits/t.max)*100);
-      var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px';
-      top.innerHTML='<div>'+
-        '<div style="font-size:12px;font-weight:700;color:#fff">'+t.name+'</div>'+
-        '<div style="font-size:10px;color:#445;margin-top:2px">'+t.club+' · '+t.date+'</div>'+
-        '<div style="font-size:10px;color:#445;margin-top:1px">'+t.inscrits+'/'+t.max+' inscrits · '+t.prix.toLocaleString()+' XAF</div>'+
-        '<div style="height:4px;background:#1a2a3a;border-radius:2px;margin-top:5px;overflow:hidden;width:140px">'+
-          '<div style="height:100%;width:'+pct+'%;background:#1A7A4A;border-radius:2px"></div></div>'+
-      '</div><span class="aobadge '+sc+'">'+sl+'</span>';
-      var acts=document.createElement('div');acts.style='display:flex;gap:5px;margin-top:7px';
-      var eb=document.createElement('button');eb.className='be';eb.textContent='Modifier';
-      (function(i2){eb.onclick=function(){oForm('edit-trn',i2);};})(idx);
-      var tb=document.createElement('button');
-      tb.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FAEEDA;color:#633806;border:none;cursor:pointer;font-weight:600';
-      tb.textContent=t.status==='open'?'Fermer':'Ouvrir';
-      (function(i2){tb.onclick=function(){
-        DB.tournaments[i2].status=DB.tournaments[i2].status==='open'?'closed':'open';
-        renderAdminTournaments();renderPlayerTournaments();showMsg('Tournoi mis a jour !');
-      };})(idx);
-      var db=document.createElement('button');db.className='bd';db.textContent='Annuler';
-      (function(i2){
-        db.onclick=function(){
-          var cf=row.querySelector('.iconfirm');if(cf){cf.remove();return;}
-          var cfRow=document.createElement('div');cfRow.className='iconfirm';
-          var lbl=document.createElement('span');lbl.style.cssText='font-size:11px;color:#F09595;flex:1';lbl.textContent='Annuler ce tournoi ?';
-          var yes=document.createElement('button');yes.style.cssText='font-size:11px;padding:3px 8px;border-radius:5px;background:#791F1F;color:#fff;border:none;cursor:pointer;font-weight:700;margin-left:6px';yes.textContent='Oui';
-          yes.onclick=function(){DB.tournaments.splice(i2,1);renderAdminTournaments();renderPlayerTournaments();showMsg('Tournoi annule.');};
-          var no=document.createElement('button');no.style.cssText='font-size:11px;padding:3px 7px;border-radius:5px;background:#2A3444;color:#aaa;border:none;cursor:pointer;margin-left:4px';no.textContent='Non';no.onclick=function(){cfRow.remove();};
-          cfRow.appendChild(lbl);cfRow.appendChild(yes);cfRow.appendChild(no);row.appendChild(cfRow);
-        };
-      })(idx);
-      acts.appendChild(eb);acts.appendChild(tb);acts.appendChild(db);
-      row.appendChild(top);row.appendChild(acts);list.appendChild(row);
-    })(i);
-  });
-}
-
-function renderPlayerTournaments(){
-  var scr=document.querySelector('#p-tournois .scr');
-  if(!scr)return;
-  var cards=scr.querySelectorAll('.card');
-  cards.forEach(function(c){c.remove();});
-  DB.tournaments.forEach(function(t){
-    var card=document.createElement('div');card.className='card';card.style.cursor='default';
-    var sc=t.status==='open'?'bb':t.status==='full'?'br':'ba';
-    var sl=t.status==='open'?'Ouvert':t.status==='full'?'Complet':'Bientot';
-    var pct=Math.round((t.inscrits/t.max)*100);
-    var top=document.createElement('div');top.style='display:flex;justify-content:space-between;align-items:flex-start';
-    top.innerHTML='<div><div class="cn">'+t.name+'</div><div class="cs">'+t.club+' · '+t.date+'</div></div><span class="bdg '+sc+'">'+sl+'</span>';
-    card.appendChild(top);
-    var tags=document.createElement('div');tags.style='display:flex;gap:4px;margin-top:5px;flex-wrap:wrap';
-    tags.innerHTML='<span class="bdg bb">'+t.max+' joueurs</span><span class="bdg ba">'+t.prix.toLocaleString()+' XAF</span><span class="bdg bg">'+t.type+'</span>';
-    card.appendChild(tags);
-    var prog=document.createElement('div');prog.className='tprog';
-    var fill=document.createElement('div');fill.className='tfill';fill.style.width=pct+'%';if(t.status==='full')fill.style.background='#A32D2D';
-    prog.appendChild(fill);card.appendChild(prog);
-    var sub=document.createElement('div');sub.style='font-size:10px;color:#888;margin-top:3px';sub.textContent=t.inscrits+'/'+t.max+' inscrits';
-    card.appendChild(sub);
-    if(t.status!=='full'){
-      var btn=document.createElement('button');btn.className='btn btnb';btn.style.marginTop='7px';
-      btn.textContent="S'inscrire - "+t.prix.toLocaleString()+' XAF';
-      btn.onclick=function(){gP('p-trn-ok');};
-      card.appendChild(btn);
-    }
-    scr.appendChild(card);
-  });
-}
-
-function addTournament(){
-  var nm=document.getElementById('nt-nm').value.trim();
-  if(!nm){showMsg('Remplis le nom !');return;}
-  DB.tournaments.push({
-    name:nm,club:document.getElementById('nt-club').value||'Padel Arena',
-    date:document.getElementById('nt-date').value||'A definir',
-    max:parseInt(document.getElementById('nt-max').value)||32,
-    inscrits:0,prix:parseInt(document.getElementById('nt-prix').value)||5000,
-    type:document.getElementById('nt-type').value||'Mixte',status:'soon'
-  });
-  closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('Tournoi cree !');
-}
-
-function saveTournament(idx){
-  var t=DB.tournaments[idx];
-  t.name=document.getElementById('nt-nm').value;
-  t.club=document.getElementById('nt-club').value;
-  t.date=document.getElementById('nt-date').value;
-  t.max=parseInt(document.getElementById('nt-max').value)||32;
-  t.prix=parseInt(document.getElementById('nt-prix').value)||5000;
-  t.type=document.getElementById('nt-type').value;
-  closeForm();renderAdminTournaments();renderPlayerTournaments();showMsg('Tournoi mis a jour !');
-}
-
-// ============================================================
-// CLUB PANEL NOTIFICATIONS
-// ============================================================
-var clubNotifs={};
-
-function addClubNotif(ci,courtName,dateStr,startT,endT){
-  if(!clubNotifs[ci])clubNotifs[ci]=[];
-  clubNotifs[ci].unshift({
-    msg:'Nouvelle reservation - '+courtName+' - '+dateStr+' - '+startT+' a '+endT,
-    time:'A l instant',read:false
-  });
-  if(cpCI===ci)cpUpdateNotifBadge();
-}
-
-function cpUpdateNotifBadge(){
-  if(cpCI<0)return;
-  var notifs=clubNotifs[cpCI]||[];
-  var unread=notifs.filter(function(n){return !n.read;}).length;
-  var badge=document.getElementById('cp-notif-badge');
-  if(badge){badge.textContent=unread;badge.style.display=unread?'flex':'none';}
-}
-
-function cpRenderNotifs(){
-  if(cpCI<0)return;
-  var notifs=clubNotifs[cpCI]||[];
-  var list=document.getElementById('cp-notifs-list');
-  if(!list)return;
-  list.innerHTML='';
-  notifs.forEach(function(n){n.read=true;});
-  cpUpdateNotifBadge();
-  if(!notifs.length){
-    list.innerHTML='<div style="font-size:12px;color:#445;text-align:center;padding:12px">Aucune notification</div>';
-    return;
-  }
-  notifs.forEach(function(n){
-    var card=document.createElement('div');
-    card.style.cssText='background:#0F1520;border-radius:8px;padding:9px;margin-bottom:5px;border:1px solid #2A3444';
-    var msg=document.createElement('div');msg.style.cssText='font-size:12px;color:#4CD68A;line-height:1.4';msg.textContent=n.msg;
-    var time=document.createElement('div');time.style.cssText='font-size:10px;color:#445;margin-top:3px';time.textContent=n.time;
-    card.appendChild(msg);card.appendChild(time);list.appendChild(card);
-  });
-}
-
-// ============================================================
-// PLAYERS INVITE FIX
-// ============================================================
-function sendInv(btn,playerName){
-  btn.textContent='Invite !';
-  btn.style.background='#E1F5EE';btn.style.color='#085041';btn.style.borderColor='#1A7A4A';btn.disabled=true;
-  showMsg('Invitation envoyee a '+playerName+' !');
-}
-
-function acceptInvite(){
-  var c=document.getElementById('inv-card');
-  if(!c) return;
-  c.style.background='#E1F5EE';
-  c.style.borderColor='#5DCAA5';
-  var acts=document.getElementById('inv-actions');
-  if(acts) acts.innerHTML='<span style="font-size:11px;color:#085041;font-weight:700">Accepte ! RDV mercredi 28 mai a 18h00</span>';
-}
-
-function declineInvite(){
-  var c=document.getElementById('inv-card');
-  if(!c) return;
-  c.style.opacity='0.5';
-  c.style.background='#f9f9f9';
-  var acts=document.getElementById('inv-actions');
-  if(acts) acts.innerHTML='<span style="font-size:11px;color:#888">Invitation declinee</span>';
-}
-
-function acceptNotifInvite(){
-  var acts=document.getElementById('notif-inv-actions');
-  if(acts) acts.innerHTML='<span style="font-size:11px;color:#085041;font-weight:700">Accepte ! RDV mercredi 28 mai a 18h00</span>';
-  // Also update the inv-card in players page
-  acceptInvite();
-}
-
-function declineNotifInvite(){
-  var acts=document.getElementById('notif-inv-actions');
-  if(acts) acts.innerHTML='<span style="font-size:11px;color:#888">Invitation declinee</span>';
-  declineInvite();
-}
-
-// ============================================================
-// TRANSLATIONS
-// ============================================================
-var currentLang='fr';
-var T={
-fr:{
-  'btn-register':'Créer un compte','btn-login':'Se connecter',
-  'login-title':'Bon retour','register-title':'Créer un compte',
-  'lbl-email':'Email','lbl-password':'Mot de passe',
-  'btn-connect':'Se connecter','forgot-pwd':'Mot de passe oublié ?',
-  'no-account':'Pas de compte ?','signup-link':"S'inscrire",
-  'lbl-firstname':'Prénom','lbl-lastname':'Nom','lbl-phone':'Téléphone',
-  'lbl-level':'Niveau','btn-create-account':'Créer mon compte',
-  'terms-text':"En t'inscrivant tu acceptes les conditions PadelGabon.",
-  'already-account':'Déjà inscrit ?','login-link':'Se connecter',
-  'lbl-clubs':'Clubs à Libreville','home-greeting':'Bonjour',
-  'nav-home':'Accueil','nav-tournaments':'Tournois','nav-players':'Joueurs',
-  'nav-shop':'Shop','nav-profile':'Profil',
-  'step1-date':'① Choisir la date','step2-court':'② Choisir le court',
-  'step3-duration':'③ Durée','step4-time':'④ Heure',
-  'slot-hint':"👆 Choisis d'abord une durée",
-  'lbl-extras':'Extras (optionnel)','lbl-machine':'Machine à balles',
-  'add-machine':'Ajouter la machine','lbl-payment':'💵 Paiement',
-  'payment-onsite':'Sur place','lbl-total':'Total estimé',
-  'btn-confirm':'Confirmer la réservation','btn-coaches':'🎓 Voir les coachs',
-  'resa-confirmed':'Réservation confirmée !',
-  'payment-note':'💵 Paiement sur place',
-  'payment-desc':'Tu paies au club après ta session.',
-  'btn-back-home':"Retour à l'accueil",
-  'coaches-title':'🎓 Coachs disponibles','btn-book':'Réserver',
-  'trn-title':'Tournois','trn-available':'Tournois disponibles',
-  'btn-register-trn':"S'inscrire",'trn-confirmed':'Inscription confirmée !',
-  'players-title':'Trouver un joueur','search-player':'🔍 Rechercher...',
-  'players-available':'Joueurs disponibles','btn-invite':'Inviter',
-  'btn-accept':'Accepter ✓','btn-decline':'Décliner',
-  'inv-received':'Invitation reçue',
-  'shop-flash':'⚡ Vente flash !','shop-discount':"Jusqu'à -30%",
-  'profile-matches':'Matchs','profile-tournaments':'Tournois','profile-friends':'Amis',
-  'lbl-my-info':'Mes informations','lbl-activities':'Mes activités',
-  'btn-my-resa':'📋 Mes réservations','btn-notifs':'🔔 Notifications',
-  'btn-logout':'Se déconnecter',
-  'history-title':'📋 Mes réservations','upcoming':'À venir','past':'Passées',
-  'confirmed':'✓ Confirmé','finished':'Terminé',
-  'btn-cancel':'✕ Annuler','cancelled':'Annulé',
-  'notifs-title':'🔔 Notifications','new-notifs':'Nouvelles','old-notifs':'Anciennes',
-  'tab-clubs':'Clubs','tab-courts':'Courts','tab-coaches':'Coachs',
-  'tab-shop':'Shop','tab-pubs':'Pubs','tab-tournaments':'Tournois','tab-revenue':'Revenus',
-  'btn-add-club':'+ Ajouter un club','active-clubs':'Clubs actifs',
-  'suspended-clubs':'Clubs suspendus','btn-manage':'Gérer',
-  'btn-reactivate':'✓ Réactiver','btn-delete':'✕',
-  'btn-add-court':'+ Ajouter un court','prices-hours':'Prix & Horaires',
-  'btn-edit':'✏️ Modifier','btn-add-product':'+ Ajouter un produit',
-  'btn-add-pub':'+ Créer une publicité','btn-create-trn':'+ Créer un tournoi',
-  'unpaid':'⚠️ Impayés',
-  'cp-title':'Accès Club','cp-subtitle':'Connecte-toi avec le code de ton club',
-  'cp-select-club':'Sélectionner ton club','cp-access-code':"Code d'accès",
-  'cp-default-code':'Code par défaut : 1234','btn-cp-login':'Se connecter',
-  'cp-tab-resa':'Résa','cp-tab-notifs':'Notifs','cp-tab-block':'Bloc.','cp-tab-courts':'Courts',
-  'cp-block-title':'🔒 Bloquer un créneau','cp-block-desc':'Pour les réservations par téléphone',
-  'btn-block-slot':'🔒 Bloquer ce créneau','btn-unblock':'🔓 Libérer',
-  'no-blocks':'Aucun créneau bloqué','no-notifs':'Aucune notification',
-  'btn-disconnect':'Déconnexion'
-},
-en:{
-  'btn-register':'Create account','btn-login':'Sign in',
-  'login-title':'Welcome back','register-title':'Create account',
-  'lbl-email':'Email','lbl-password':'Password',
-  'btn-connect':'Sign in','forgot-pwd':'Forgot password?',
-  'no-account':'No account?','signup-link':'Sign up',
-  'lbl-firstname':'First name','lbl-lastname':'Last name','lbl-phone':'Phone',
-  'lbl-level':'Level','btn-create-account':'Create my account',
-  'terms-text':'By signing up you accept PadelGabon terms.',
-  'already-account':'Already registered?','login-link':'Sign in',
-  'lbl-clubs':'Clubs in Libreville','home-greeting':'Hello',
-  'nav-home':'Home','nav-tournaments':'Tournaments','nav-players':'Players',
-  'nav-shop':'Shop','nav-profile':'Profile',
-  'step1-date':'① Choose date','step2-court':'② Choose court',
-  'step3-duration':'③ Duration','step4-time':'④ Time',
-  'slot-hint':'👆 Choose a duration first',
-  'lbl-extras':'Extras (optional)','lbl-machine':'Ball machine',
-  'add-machine':'Add ball machine','lbl-payment':'💵 Payment',
-  'payment-onsite':'On site','lbl-total':'Estimated total',
-  'btn-confirm':'Confirm booking','btn-coaches':'🎓 See coaches',
-  'resa-confirmed':'Booking confirmed!',
-  'payment-note':'💵 Payment on site',
-  'payment-desc':'You pay at the club after your session.',
-  'btn-back-home':'Back to home',
-  'coaches-title':'🎓 Available coaches','btn-book':'Book',
-  'trn-title':'Tournaments','trn-available':'Available tournaments',
-  'btn-register-trn':'Register','trn-confirmed':'Registration confirmed!',
-  'players-title':'Find a player','search-player':'🔍 Search...',
-  'players-available':'Available players','btn-invite':'Invite',
-  'btn-accept':'Accept ✓','btn-decline':'Decline',
-  'inv-received':'Invitation received',
-  'shop-flash':'⚡ Flash sale!','shop-discount':'Up to -30%',
-  'profile-matches':'Matches','profile-tournaments':'Tournaments','profile-friends':'Friends',
-  'lbl-my-info':'My information','lbl-activities':'My activities',
-  'btn-my-resa':'📋 My bookings','btn-notifs':'🔔 Notifications',
-  'btn-logout':'Sign out',
-  'history-title':'📋 My bookings','upcoming':'Upcoming','past':'Past',
-  'confirmed':'✓ Confirmed','finished':'Done',
-  'btn-cancel':'✕ Cancel','cancelled':'Cancelled',
-  'notifs-title':'🔔 Notifications','new-notifs':'New','old-notifs':'Earlier',
-  'tab-clubs':'Clubs','tab-courts':'Courts','tab-coaches':'Coaches',
-  'tab-shop':'Shop','tab-pubs':'Ads','tab-tournaments':'Tournaments','tab-revenue':'Revenue',
-  'btn-add-club':'+ Add club','active-clubs':'Active clubs',
-  'suspended-clubs':'Suspended clubs','btn-manage':'Manage',
-  'btn-reactivate':'✓ Reactivate','btn-delete':'✕',
-  'btn-add-court':'+ Add court','prices-hours':'Prices & Hours',
-  'btn-edit':'✏️ Edit','btn-add-product':'+ Add product',
-  'btn-add-pub':'+ Create ad','btn-create-trn':'+ Create tournament',
-  'unpaid':'⚠️ Unpaid',
-  'cp-title':'Club Access','cp-subtitle':'Sign in with your club code',
-  'cp-select-club':'Select your club','cp-access-code':'Access code',
-  'cp-default-code':'Default code: 1234','btn-cp-login':'Sign in',
-  'cp-tab-resa':'Bookings','cp-tab-notifs':'Notifs','cp-tab-block':'Block','cp-tab-courts':'Courts',
-  'cp-block-title':'🔒 Block a slot','cp-block-desc':'For phone bookings',
-  'btn-block-slot':'🔒 Block this slot','btn-unblock':'🔓 Unblock',
-  'no-blocks':'No blocked slots','no-notifs':'No notifications',
-  'btn-disconnect':'Sign out'
-}
-};
-
-function t(key){var l=T[currentLang]||T.fr;return l[key]||T.fr[key]||key;}
-
-function setLang(lang){
-  currentLang=lang;
-  var fr=document.getElementById('lang-fr');
-  var en=document.getElementById('lang-en');
-  if(fr&&en){
-    if(lang==='fr'){
-      fr.style.background='rgba(255,255,255,.3)';fr.style.color='#fff';fr.style.borderColor='rgba(255,255,255,.6)';
-      en.style.background='rgba(255,255,255,.1)';en.style.color='rgba(255,255,255,.6)';en.style.borderColor='rgba(255,255,255,.25)';
-    }else{
-      en.style.background='rgba(255,255,255,.3)';en.style.color='#fff';en.style.borderColor='rgba(255,255,255,.6)';
-      fr.style.background='rgba(255,255,255,.1)';fr.style.color='rgba(255,255,255,.6)';fr.style.borderColor='rgba(255,255,255,.25)';
-    }
-  }
-  applyLang();
-}
-
-function applyLang(){
-  // Update all data-i18n elements
-  var els=document.querySelectorAll('[data-i18n]');
-  for(var i=0;i<els.length;i++){
-    var key=els[i].getAttribute('data-i18n');
-    if(els[i].tagName==='INPUT'||els[i].tagName==='TEXTAREA') els[i].placeholder=t(key);
-    else els[i].textContent=t(key);
-  }
-  // Splash buttons
-  var br=document.getElementById('btn-register');if(br)br.textContent=t('btn-register');
-  var bl=document.getElementById('btn-login');if(bl)bl.textContent=t('btn-login');
-  // Admin tabs divs
-  var tabKeys=['tab-clubs','tab-courts','tab-coaches','tab-shop','tab-pubs','tab-tournaments','tab-revenue'];
-  var tabs=document.querySelectorAll('.atab div');
-  for(var i=0;i<tabs.length&&i<tabKeys.length;i++) tabs[i].textContent=t(tabKeys[i]);
-  // Club panel
-  var cpt=document.getElementById('cp-panel-title');if(cpt)cpt.textContent=t('cp-title');
-  var cps=document.getElementById('cp-panel-sub');if(cps)cps.textContent=t('cp-subtitle');
-  var cpbl=document.getElementById('cp-login-btn');if(cpbl)cpbl.textContent=t('btn-cp-login');
+    // ── Re-render avec les vraies données ──
+    try{renderHomeClubs();}catch(e){}
+    try{renderAdminTournaments();}catch(e){}
+    try{renderPlayerTournaments();}catch(e){}
+    try{buildCoachClubSelector();}catch(e){}
+  }catch(e){ console.log('initSupabase admin error:',e.message); }
 }
 
 // ============================================================
 // INIT
 // ============================================================
-renderHomeClubs();
-cpInit();
-buildCoachClubSelector();
-renderAdminTournaments();
-renderPlayerTournaments();
-</script>
-<script>
-// Register Service Worker for PWA
-if('serviceWorker' in navigator){
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('./sw.js').then(function(reg){
-      console.log('PadelGabon PWA ready!');
-    }).catch(function(err){
-      console.log('SW error:', err);
-    });
-  });
-}
-</script>
-<script>
-var ADMIN_PASSWORD = 'padelgabon2026';
+try{renderHomeClubs();}catch(e){}
+try{cpInit();}catch(e){}
+try{buildCoachClubSelector();}catch(e){}
+try{renderAdminTournaments();}catch(e){}
+try{renderPlayerTournaments();}catch(e){}
+initSupabase();
+var ADMIN_PASSWORD = (window.PADELGABON_CONFIG && window.PADELGABON_CONFIG.adminPassword) || 'padel2026';
 
 function checkAdminPwd(){
   var pwd = document.getElementById('admin-pwd').value;
@@ -4104,7 +2319,6 @@ function checkAdminPwd(){
 if('serviceWorker' in navigator){
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('./sw.js').then(function(reg){
-      console.log('PadelGabon PWA ready!');
     }).catch(function(err){
       console.log('SW error:', err);
     });
