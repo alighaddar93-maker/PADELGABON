@@ -1,6 +1,11 @@
 // Test de base : vérifie que les 3 pages se chargent correctement
 const { test, expect } = require('@playwright/test');
 
+// Ne pas toucher la vraie base Supabase pendant les tests
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { try { localStorage.setItem('pg_no_sb', '1'); } catch (e) {} });
+});
+
 test('@smoke la page joueur se charge et montre l\'écran d\'accueil', async ({ page }) => {
   await page.goto('/index.html');
   await expect(page).toHaveTitle(/PadelGabon/i);

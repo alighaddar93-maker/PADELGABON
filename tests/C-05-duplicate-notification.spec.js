@@ -1,7 +1,9 @@
 // [C-05] La notification de réservation ne doit être envoyée qu'UNE seule fois
 const { test, expect } = require('@playwright/test');
+const { seedClub } = require('./_seed');
 
 test('[C-05] confirmer une réservation envoie exactement 1 notification au club', async ({ page }) => {
+  await seedClub(page);
   await page.goto('/index.html');
 
   // On compte combien de fois addClubNotif est appelée

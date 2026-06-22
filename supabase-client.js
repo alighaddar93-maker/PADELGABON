@@ -3,15 +3,24 @@
 // Les credentials viennent de config.js (gitignored)
 // ============================================
 var _cfg = (typeof window !== 'undefined' && window.PADELGABON_CONFIG) || {};
-const SUPABASE_URL = _cfg.supabaseUrl || '';
-const SUPABASE_KEY = _cfg.supabaseKey || '';
+// Valeurs de secours = clés PUBLIQUES Supabase (conçues pour être dans l'app ; la sécurité vient des règles RLS).
+// Ça permet à l'app déployée (où config.js n'est pas présent) de se connecter quand même.
+const SUPABASE_URL = _cfg.supabaseUrl || 'https://qsdlliiktzsduufpbrte.supabase.co';
+const SUPABASE_KEY = _cfg.supabaseKey || 'sb_publishable_tt0Evfx1w4hz0Zuve-M0rQ_NVwTxH4x';
 
-// Compatibilité avec différentes versions du SDK Supabase
+// Ne créer le client que si les credentials sont présents
 var _sbLib = window.supabase || (window.Supabase && window.Supabase.createClient ? window.Supabase : null);
-if (!_sbLib) { console.error('❌ Supabase SDK non chargé'); }
-var sb = _sbLib ? _sbLib.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false }
-}) : null;
+var sb = null;
+// Garde : permet de désactiver Supabase (utilisé par les tests pour ne pas toucher la vraie base)
+var _noSb = false;
+try { _noSb = (typeof localStorage !== 'undefined' && localStorage.getItem('pg_no_sb')); } catch(e) {}
+try {
+  if (!_noSb && _sbLib && SUPABASE_URL && SUPABASE_KEY) {
+    sb = _sbLib.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, storageKey: 'pg_sb_auth' }
+    });
+  }
+} catch(e) { console.log('Supabase init skipped:', e.message); }
 
 // Test de connexion au démarrage
 if (sb) {
@@ -114,12 +123,22 @@ async function sbLoadAllClubReservations(clubId) {
 }
 
 async function sbCreateReservation(resa) {
-  const { data, error } = await sb.from('reservations').insert([resa]).select().single();
-  if (error) {
-    if (error.code === '23505') throw new Error('Ce créneau est déjà réservé par quelqu\'un d\'autre !');
-    throw new Error(error.message);
+  // Marquer qui réserve → permet au joueur d'annuler SA propre résa sous RLS
+  let payload = resa;
+  try {
+    const { data: u } = await sb.auth.getUser();
+    if (u && u.user) payload = Object.assign({}, resa, { user_id: u.user.id });
+  } catch (e) {}
+  let res = await sb.from('reservations').insert([payload]).select().single();
+  // Si la colonne user_id n'existe pas encore (RLS pas appliqué) → réessayer sans
+  if (res.error && /user_id/.test(res.error.message || '')) {
+    res = await sb.from('reservations').insert([resa]).select().single();
   }
-  return data;
+  if (res.error) {
+    if (res.error.code === '23505') throw new Error('Ce créneau est déjà réservé par quelqu\'un d\'autre !');
+    throw new Error(res.error.message);
+  }
+  return res.data;
 }
 
 async function sbCancelReservation(id) {
@@ -180,6 +199,21 @@ async function sbLoadCoaches() {
   return data;
 }
 
+// Coachs indépendants (modèle de l'app : clubs stockés en jsonb)
+async function sbLoadCoachesInd() {
+  const { data, error } = await sb.from('coaches').select('*').order('name');
+  if (error) { console.error('sbLoadCoachesInd:', error.message); return []; }
+  return data;
+}
+async function sbUpdateCoach(id, updates) {
+  const { error } = await sb.from('coaches').update(updates).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+async function sbDeleteCoach(id) {
+  const { error } = await sb.from('coaches').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
 async function sbLoadCoachesByClub(clubId) {
   const { data, error } = await sb
     .from('coach_clubs')
@@ -206,7 +240,7 @@ async function sbLinkCoachToClub(coachId, clubId) {
 async function sbLoadTournaments() {
   const { data, error } = await sb
     .from('tournaments')
-    .select('*, clubs(name)')
+    .select('*')
     .order('start_date');
   if (error) return [];
   return data;
@@ -220,6 +254,11 @@ async function sbAddTournament(tournament) {
 
 async function sbUpdateTournament(id, updates) {
   const { error } = await sb.from('tournaments').update(updates).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+async function sbDeleteTournament(id) {
+  const { error } = await sb.from('tournaments').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }
 
@@ -329,6 +368,10 @@ function sbClubsToLocalDB(sbClubs, sbCoaches) {
       suspendedReason: c.suspended_reason || '',
       subscriptionStatus: c.subscription_status || 'trial',
       accessCode: c.access_code || '1234',
+      abo: c.abo || 25000,
+      photo: c.photo || '',
+      paymentPhone: c.payment_phone || '',
+      paymentProvider: c.payment_provider || 'Airtel Money',
       coaches: clubCoaches,
       courts: (c.courts || []).map(function(ct) {
         return {
@@ -366,6 +409,176 @@ function sbResasToLocal(sbResas) {
     };
   });
   return local;
+}
+
+// ============================================
+// LISTES GÉNÉRIQUES (pubs, magasins, joueurs) — stockées en JSON
+// ============================================
+async function sbSaveList(key, arr) {
+  if (!sb) return;
+  try {
+    const { error } = await sb.from('app_lists')
+      .upsert({ key: key, data: arr || [], updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    if (error) console.error('sbSaveList', key, error.message);
+  } catch (e) { console.log('sbSaveList', key, e.message); }
+}
+async function sbLoadList(key) {
+  if (!sb) return null;
+  try {
+    const { data, error } = await sb.from('app_lists').select('data').eq('key', key).maybeSingle();
+    if (error || !data) return null;
+    return data.data;
+  } catch (e) { return null; }
+}
+
+// ============================================
+// AUTHENTIFICATION (comptes réels Supabase Auth)
+// ============================================
+// Auth disponible uniquement si le client existe (donc pas en mode test pg_no_sb)
+function sbAuthReady() { return !!sb; }
+
+// Inscription : crée un compte email + mot de passe.
+// meta = { name, phone, level, role } stocké dans les métadonnées (récupéré par le trigger -> profiles)
+async function sbSignUp(email, password, meta) {
+  if (!sb) return { ok:false, error:'offline' };
+  try {
+    const { data, error } = await sb.auth.signUp({
+      email: email, password: password,
+      options: { data: meta || {} }
+    });
+    if (error) return { ok:false, error: error.message };
+    // Si la confirmation email est désactivée (recommandé), une session est créée tout de suite.
+    if (data.session) return { ok:true, user: data.user, session: data.session };
+    // Sinon : compte créé mais email à confirmer.
+    return { ok:true, user: data.user, session: null, needConfirm: true };
+  } catch (e) { return { ok:false, error: e.message }; }
+}
+
+// Connexion
+async function sbSignIn(email, password) {
+  if (!sb) return { ok:false, error:'offline' };
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({ email: email, password: password });
+    if (error) return { ok:false, error: error.message };
+    return { ok:true, user: data.user, session: data.session };
+  } catch (e) { return { ok:false, error: e.message }; }
+}
+
+// Déconnexion
+async function sbSignOut() {
+  if (!sb) return;
+  try { await sb.auth.signOut(); } catch (e) {}
+}
+
+// Récupère l'utilisateur connecté (ou null)
+async function sbGetUser() {
+  if (!sb) return null;
+  try {
+    const { data, error } = await sb.auth.getUser();
+    if (error || !data || !data.user) return null;
+    return data.user;
+  } catch (e) { return null; }
+}
+
+// Récupère le profil (role, name, club_id...) depuis la table profiles
+async function sbGetProfile(userId) {
+  if (!sb || !userId) return null;
+  try {
+    const { data, error } = await sb.from('profiles').select('*').eq('id', userId).maybeSingle();
+    if (error || !data) return null;
+    return data;
+  } catch (e) { return null; }
+}
+
+// Met à jour le profil de l'utilisateur connecté
+async function sbUpdateProfile(userId, updates) {
+  if (!sb || !userId) return false;
+  try {
+    const { error } = await sb.from('profiles').update(updates).eq('id', userId);
+    return !error;
+  } catch (e) { return false; }
+}
+
+// Crée (depuis l'admin) un compte de connexion pour un CLUB et le rattache à ce club.
+// Utilise un client secondaire pour NE PAS déconnecter l'admin courant.
+async function sbCreateClubAccount(email, password, clubId, clubName) {
+  if (!sb || !_sbLib) return { ok:false, error:'offline' };
+  if (!clubId) return { ok:false, error:'Ce club n\'est pas encore synchronisé en ligne' };
+  try {
+    // 1) Créer le compte via un client temporaire (session non persistée)
+    const sb2 = _sbLib.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+    const { data, error } = await sb2.auth.signUp({
+      email: email, password: password,
+      options: { data: { name: clubName || 'Club', role: 'club' } }
+    });
+    if (error) {
+      let m = error.message || 'Erreur';
+      if (/already|registered|exists/i.test(m)) m = 'Cet email a déjà un compte';
+      return { ok:false, error: m };
+    }
+    // 2) Rattacher le profil à ce club (fait par l'admin connecté → autorisé par RLS)
+    const uid = data && data.user ? data.user.id : null;
+    let upd;
+    if (uid) upd = await sb.from('profiles').update({ role:'club', club_id: clubId }).eq('id', uid);
+    else     upd = await sb.from('profiles').update({ role:'club', club_id: clubId }).eq('email', email);
+    if (upd.error) return { ok:false, error: 'Compte créé mais liaison club échouée : ' + upd.error.message };
+    return { ok:true };
+  } catch (e) { return { ok:false, error: e.message }; }
+}
+
+// Email de réinitialisation de mot de passe
+async function sbResetPassword(email) {
+  if (!sb) return { ok:false, error:'offline' };
+  try {
+    const { error } = await sb.auth.resetPasswordForEmail(email);
+    if (error) return { ok:false, error: error.message };
+    return { ok:true };
+  } catch (e) { return { ok:false, error: e.message }; }
+}
+
+// ============================================
+// CENTRE DE NOTIFICATIONS (en ligne, multi-appareils)
+// ============================================
+// Crée une notification. n = {type, audience, target_user_id?, club_id?, title, body, data?}
+async function sbPushNotif(n) {
+  if (!sb || !n || !n.audience) return;
+  try {
+    const row = {
+      type: n.type || null,
+      audience: n.audience,
+      target_user_id: n.target_user_id || null,
+      club_id: n.club_id || null,
+      title: n.title || '',
+      body: n.body || '',
+      data: n.data || {}
+    };
+    const { error } = await sb.from('notifications').insert([row]);
+    if (error) console.log('sbPushNotif', error.message);
+  } catch (e) { console.log('sbPushNotif', e.message); }
+}
+
+// Charge les notifications visibles par l'utilisateur courant (RLS filtre déjà).
+async function sbLoadMyNotifs(limit) {
+  if (!sb) return [];
+  try {
+    const { data, error } = await sb.from('notifications')
+      .select('*').order('created_at', { ascending: false }).limit(limit || 50);
+    if (error || !data) return [];
+    return data;
+  } catch (e) { return []; }
+}
+
+// Écoute en temps réel toutes les nouvelles notifications (le callback filtre/refait le rendu).
+function sbWatchMyNotifs(cb) {
+  if (!sb) return null;
+  try {
+    return sb.channel('notifs_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' },
+        function (payload) { try { cb(payload.new); } catch (e) {} })
+      .subscribe();
+  } catch (e) { return null; }
 }
 
 console.log('✅ PadelGabon — Supabase client chargé');

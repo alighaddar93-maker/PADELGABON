@@ -1,7 +1,9 @@
 // [H-04] Les créneaux déjà passés ne doivent PAS apparaître dans la grille
 const { test, expect } = require('@playwright/test');
+const { seedClub } = require('./_seed');
 
 test("[H-04] aujourd'hui : aucun créneau passé ne doit être proposé", async ({ page }) => {
+  await seedClub(page);
   await page.goto('/index.html');
 
   await page.evaluate(() => {
