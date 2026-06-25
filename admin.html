@@ -1001,7 +1001,7 @@ function renderAdminClubs(){
       if(c.suspended){
         sc++;
         main.innerHTML='<div class="cdot" style="background:#E24B4A"></div>'+
-          '<div class="cinfo"><div class="cname-a">'+esc(c.name)+'</div><div class="cmeta" style="color:#F09595">'+c.suspendedReason+'</div></div>';
+          '<div class="cinfo"><div class="cname-a">'+esc(c.name)+'</div><div class="cmeta" style="color:#F09595">'+esc(c.suspendedReason)+'</div></div>';
         var acts=document.createElement('div');acts.style='display:flex;gap:4px';
         var re=document.createElement('button');re.className='be';re.textContent='✓ Réactiver';
         re.style.cssText='background:#E1F5EE;color:var(--limeD);border:none;border-radius:5px;padding:3px 7px;font-size:10px;font-weight:600;cursor:pointer';
