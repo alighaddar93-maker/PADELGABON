@@ -1440,12 +1440,11 @@ var cpCI = -1; // current club index for panel
 var cpManualBlocks = {}; // key: same as DB.reservations, value: {name, ci, coi, dk, sm, em}
 
 function cpInit(){
-  // Basculer l'UI de connexion : en ligne = email/mdp ; hors-ligne/test = sélection + code
+  // Connexion uniquement par email + mot de passe (le code club n'est plus un accès)
   try{
-    var online=(typeof sbAuthReady==='function' && sbAuthReady());
     var on=document.getElementById('cp-online-login'), off=document.getElementById('cp-offline-login');
-    if(on) on.style.display = online ? 'block' : 'none';
-    if(off) off.style.display = online ? 'none' : 'block';
+    if(on) on.style.display='block';
+    if(off) off.style.display='none';
   }catch(e){}
   // If logged in club was deleted or suspended, force logout
   if(cpCI >= 0){
@@ -1473,44 +1472,32 @@ function cpInit(){
 }
 
 async function cpLogin(){
-  // ── Auth réelle Supabase (en ligne) : email + mot de passe + rôle club ──
-  if(typeof sbAuthReady==='function' && sbAuthReady()){
-    var em=(document.getElementById('cp-em')||{}).value;
-    var pw=(document.getElementById('cp-pw')||{}).value;
-    em=(em||'').trim().toLowerCase();
-    if(!em||!pw){ showMsg('Entre email et mot de passe !'); return; }
-    var r=await sbSignIn(em,pw);
-    if(!r.ok){ showMsg('❌ Email ou mot de passe incorrect'); return; }
-    var prof=null; try{ prof=await sbGetProfile(r.user.id); }catch(e){}
-    if(!prof || (prof.role!=='club' && prof.role!=='admin')){
-      try{ await sbSignOut(); }catch(e){}
-      showMsg('❌ Ce compte n\'est pas un compte club'); return;
-    }
-    // Trouver le club lié (par club_id). L'admin peut choisir via le sélecteur.
-    var idx=-1;
-    if(prof.club_id){ idx=DB.clubs.findIndex(function(c){return c._id===prof.club_id;}); }
-    if(idx<0 && prof.role==='admin'){
-      var sel0=document.getElementById('cp-club-select');
-      if(sel0 && !isNaN(parseInt(sel0.value))) idx=parseInt(sel0.value);
-    }
-    if(idx<0){ showMsg('❌ Aucun club rattaché à ce compte'); return; }
-    cpCI=idx;
-    document.getElementById('club-panel-login').style.display='none';
-    document.getElementById('club-panel-dash').style.display='block';
-    cpLoadDash();
-    return;
+  // Auth UNIQUEMENT via Supabase (aucun code club côté client).
+  if(typeof sbAuthReady!=='function' || !sbAuthReady()){
+    showMsg('❌ Connexion internet requise pour se connecter.'); return;
   }
-  // ── Repli local (tests / hors-ligne) : sélection club + code ──
-  var sel=document.getElementById('cp-club-select');
-  var idx = parseInt(sel.value);
-  if(isNaN(idx)){ idx = sel.selectedIndex>=0?sel.selectedIndex:0; }
-  var code = document.getElementById('cp-code').value.trim();
-  if(!code){ showMsg('Entre le code !'); return; }
-  var clubCode=(DB.clubs[idx]&&DB.clubs[idx].accessCode)?String(DB.clubs[idx].accessCode):'1234';
-  if(code !== clubCode){ showMsg('❌ Code incorrect pour ce club !'); return; }
-  cpCI = idx;
-  document.getElementById('club-panel-login').style.display = 'none';
-  document.getElementById('club-panel-dash').style.display = 'block';
+  var em=(document.getElementById('cp-em')||{}).value;
+  var pw=(document.getElementById('cp-pw')||{}).value;
+  em=(em||'').trim().toLowerCase();
+  if(!em||!pw){ showMsg('Entre email et mot de passe !'); return; }
+  var r=await sbSignIn(em,pw);
+  if(!r.ok){ showMsg('❌ Email ou mot de passe incorrect'); return; }
+  var prof=null; try{ prof=await sbGetProfile(r.user.id); }catch(e){}
+  if(!prof || (prof.role!=='club' && prof.role!=='admin')){
+    try{ await sbSignOut(); }catch(e){}
+    showMsg('❌ Ce compte n\'est pas un compte club'); return;
+  }
+  // Trouver le club lié (par club_id). L'admin peut choisir via le sélecteur.
+  var idx=-1;
+  if(prof.club_id){ idx=DB.clubs.findIndex(function(c){return c._id===prof.club_id;}); }
+  if(idx<0 && prof.role==='admin'){
+    var sel0=document.getElementById('cp-club-select');
+    if(sel0 && !isNaN(parseInt(sel0.value))) idx=parseInt(sel0.value);
+  }
+  if(idx<0){ showMsg('❌ Aucun club rattaché à ce compte'); return; }
+  cpCI=idx;
+  document.getElementById('club-panel-login').style.display='none';
+  document.getElementById('club-panel-dash').style.display='block';
   cpLoadDash();
 }
 

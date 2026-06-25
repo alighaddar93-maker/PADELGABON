@@ -3295,8 +3295,6 @@ function renderAdminNotifBadge(){
   if(b){ b.textContent=c; b.style.display=c>0?'inline-block':'none'; }
 }
 
-var ADMIN_PASSWORD = 'padel2026';
-
 function openAdminApp(){
   document.getElementById('admin-gate').style.display = 'none';
   document.getElementById('admin-app').style.display = 'flex';
@@ -3324,25 +3322,20 @@ async function checkAdminPwd(){
   var emEl=document.getElementById('admin-em');
   var em=emEl?emEl.value.trim().toLowerCase():'';
   var pwd=document.getElementById('admin-pwd').value;
-  // ── EN LIGNE : SEUL un vrai compte admin (email + mot de passe + rôle admin) ──
-  if(typeof sbAuthReady==='function' && sbAuthReady()){
-    if(!em||!pwd){ adminLoginError('Entre email et mot de passe'); return; }
-    var btn=document.querySelector('#admin-gate .asub'); if(btn){btn.textContent='Connexion…';}
-    var r=await sbSignIn(em,pwd);
-    if(btn){btn.textContent='Se connecter';}
-    if(!r.ok){ adminLoginError('Email ou mot de passe incorrect'); return; }
-    var prof=null; try{ prof=await sbGetProfile(r.user.id); }catch(e){}
-    if(prof && prof.role==='admin'){ openAdminApp(); return; }
-    try{ await sbSignOut(); }catch(e){}
-    adminLoginError('Ce compte n\'est pas administrateur');
+  // Auth UNIQUEMENT via Supabase (aucun mot de passe maître côté client).
+  if(typeof sbAuthReady!=='function' || !sbAuthReady()){
+    adminLoginError('Connexion internet requise pour se connecter.');
     return;
   }
-  // ── HORS-LIGNE / TESTS uniquement : mot de passe maître (jamais en production) ──
-  if(pwd === ADMIN_PASSWORD){
-    openAdminApp();
-  } else {
-    adminLoginError('Identifiants incorrects');
-  }
+  if(!em||!pwd){ adminLoginError('Entre email et mot de passe'); return; }
+  var btn=document.querySelector('#admin-gate .asub'); if(btn){btn.textContent='Connexion…';}
+  var r=await sbSignIn(em,pwd);
+  if(btn){btn.textContent='Se connecter';}
+  if(!r.ok){ adminLoginError('Email ou mot de passe incorrect'); return; }
+  var prof=null; try{ prof=await sbGetProfile(r.user.id); }catch(e){}
+  if(prof && prof.role==='admin'){ openAdminApp(); return; }
+  try{ await sbSignOut(); }catch(e){}
+  adminLoginError('Ce compte n\'est pas administrateur');
 }
 </script>
 <script>

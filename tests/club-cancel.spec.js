@@ -46,10 +46,15 @@ test('@cancel club annule une réservation app et libère le créneau', async ({
   await page.goto('/club.html');
   await page.waitForTimeout(400);
 
-  // 2. Connexion club
-  await page.selectOption('#cp-club-select', { index: 0 });
-  await page.fill('#cp-code', '1234');
-  await page.click('#club-panel-login button');
+  // 2. Ouvrir le tableau de bord club (bypass de la connexion : en prod l'accès
+  //    passe UNIQUEMENT par Supabase Auth, qui est désactivé en mode test offline).
+  await page.evaluate(() => {
+    if (typeof loadClubsFromStorage === 'function') loadClubsFromStorage();
+    cpCI = 0;
+    document.getElementById('club-panel-login').style.display = 'none';
+    document.getElementById('club-panel-dash').style.display = 'block';
+    cpLoadDash();
+  });
   await page.waitForTimeout(400);
 
   // 3. La réservation doit être visible
