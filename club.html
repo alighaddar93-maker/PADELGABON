@@ -669,31 +669,40 @@ function showConfirm(sM,eM){
   setTimeout(function(){document.getElementById('conf-box').scrollIntoView({behavior:'smooth',block:'nearest'});},100);
 }
 
-function confirmResa(){
+var _confirmInFlight=false;
+async function confirmResa(){
+  if(_confirmInFlight) return; // V3-R7 : pas de double réservation
   var cb=document.getElementById('conf-box');
   var sM=parseInt(cb.dataset.sm),eM=parseInt(cb.dataset.em);
   var cl=DB.clubs[curCI],court=cl.courts[curCourtI];
   var numSlots=curDur/30;
-  // ── Sauvegarder dans Supabase ──
+  var hasConflict=false;
+  for(var s=0;s<numSlots;s++){if(DB.reservations[rk(curCI,curCourtI,curDateKey,sM+(s*30))]){hasConflict=true;break;}}
+  if(hasConflict){showMsg('⚠️ Créneau déjà réservé - choisissez une autre heure !');buildSlots();cb.style.display='none';return;}
+  _confirmInFlight=true;
+  // ── EN LIGNE : attendre la confirmation du serveur AVANT le succès (V3-R1/R2) ──
   if(sbLoaded && cl._id && court._id){
     var total=cl.prices[curDur]||0;
     if(curMachine) total+=cl.machinePrice;
     curExtras.forEach(function(on,i){if(on&&cl.extras[i])total+=cl.extras[i].p;});
-    sbCreateReservation({
-      club_id:cl._id, court_id:court._id,
-      player_name:DB.currentPlayer.name||'Joueur',
-      player_phone:DB.currentPlayer.phone||'',
-      date_key:curDateKey, start_minutes:sM, end_minutes:eM, duration:curDur,
-      use_machine:curMachine, total_amount:total, status:'confirmed'
-    }).then(function(saved){
-      for(var s=0;s<numSlots;s++) DB.reservationIds[rk(curCI,curCourtI,curDateKey,sM+(s*30))]=saved.id;
-      sbAddNotif(cl._id,'reservation','🎾 Nouvelle réservation',
-        court.name+' · '+fmtDK(curDateKey)+' · '+tStr(sM)+'-'+tStr(eM),{});
-    }).catch(function(e){console.log('Supabase save:',e.message);});
+    try{
+      var saved=await sbCreateReservation({
+        club_id:cl._id, court_id:court._id,
+        player_name:DB.currentPlayer.name||'Joueur',
+        player_phone:DB.currentPlayer.phone||'',
+        date_key:curDateKey, start_minutes:sM, end_minutes:eM, duration:curDur,
+        use_machine:curMachine, total_amount:total, status:'confirmed'
+      });
+      for(var s2=0;s2<numSlots;s2++) DB.reservationIds[rk(curCI,curCourtI,curDateKey,sM+(s2*30))]=saved.id;
+      try{ sbAddNotif(cl._id,'reservation','🎾 Nouvelle réservation',
+        court.name+' · '+fmtDK(curDateKey)+' · '+tStr(sM)+'-'+tStr(eM),{}); }catch(e){}
+    }catch(e){
+      _confirmInFlight=false;
+      showMsg('❌ '+(e.message||'Réservation impossible. Réessaie.'));
+      buildSlots();
+      return;
+    }
   }
-  var hasConflict=false;
-  for(var s=0;s<numSlots;s++){if(DB.reservations[rk(curCI,curCourtI,curDateKey,sM+(s*30))]){hasConflict=true;break;}}
-  if(hasConflict){showMsg('⚠️ Créneau déjà réservé - choisissez une autre heure !');buildSlots();document.getElementById('conf-box').style.display='none';return;}
   for(var s=0;s<numSlots;s++) DB.reservations[rk(curCI,curCourtI,curDateKey,sM+(s*30))]=true;
   document.getElementById('s-resa-d').textContent=court.name+' · '+court.type+'\n'+fmtDK(curDateKey)+'\n'+tStr(sM)+' → '+tStr(eM)+' ('+durLbl(curDur)+')\n'+cl.name;
   document.getElementById('s-code').textContent=rCode();
@@ -701,7 +710,8 @@ function confirmResa(){
   if(typeof addClubNotif==='function') addClubNotif(curCI,court.name,fmtDK(curDateKey),tStr(sM),tStr(eM),DB.currentPlayer.name,DB.currentPlayer.phone,curDateKey);
   saveResasToStorage();
   buildSlots();
-  document.getElementById('conf-box').style.display='none';
+  cb.style.display='none';
+  _confirmInFlight=false;
   gP('p-resa-ok');
 }
 
@@ -1786,10 +1796,13 @@ function cpConfirmCancel(item,cardEl){
 }
 
 // Annuler une réservation → libère le créneau dans l'app
-function cpCancelResa(item){
+async function cpCancelResa(item){
   var cl=DB.clubs[cpCI];
-  // Annuler aussi dans Supabase (réservation venant de l'app, en ligne)
-  if(sbLoaded && item._id){ try{ sbCancelReservation(item._id); }catch(e){ console.log('sbCancel:',e.message); } }
+  // ── EN LIGNE : attendre la confirmation du serveur AVANT de libérer localement (V3-R2) ──
+  if(sbLoaded && item._id){
+    try{ await sbCancelReservation(item._id); }
+    catch(e){ showMsg('❌ '+(e.message||'Annulation impossible. Réessaie.')); return; }
+  }
   // 🔔 Prévenir tous les joueurs qu'un créneau s'est libéré
   if(sbLoaded && typeof sbPushNotif==='function'){
     try{ sbPushNotif({ type:'cancel_club', audience:'all_players',

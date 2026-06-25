@@ -479,7 +479,7 @@ window.addEventListener('storage',function(e){if(e.key==='pg_theme')applyTheme()
       <div style="height:1px;background:var(--bd);margin:5px 0"></div>
       <div class="cr"><span class="cl2">💵 Paiement</span><span class="cv" style="color:var(--lime)">Sur place</span></div>
       <div class="cr"><span class="cl2">Total estimé</span><span class="cv" id="cf-total" style="color:var(--lime);font-size:14px"></span></div>
-      <button class="btn btng" onclick="confirmResa()" data-i18n="btn-confirm">Confirmer la réservation</button>
+      <button id="conf-confirm-btn" class="btn btng" onclick="confirmResa()" data-i18n="btn-confirm">Confirmer la réservation</button>
     </div>
   </div>
   <button class="btn btnb" style="margin-top:4px" onclick="gP('p-coaches')" data-i18n="btn-coaches">🎓 Voir les coachs</button>
@@ -1255,13 +1255,27 @@ function showConfirm(sM,eM){
   setTimeout(function(){document.getElementById('conf-box').scrollIntoView({behavior:'smooth',block:'nearest'});},100);
 }
 
-function confirmResa(){
+var _confirmInFlight=false;
+async function confirmResa(){
+  if(_confirmInFlight) return; // V3-R7 : empêche le double-clic = double réservation
   var cb=document.getElementById('conf-box');
   var sM=parseInt(cb.dataset.sm),eM=parseInt(cb.dataset.em);
   var cl=DB.clubs[curCI],court=cl.courts[curCourtI];
   var numSlots=curDur/30;
 
-  // ── Sauvegarder dans Supabase si connecté ──
+  // Recharger l'état le plus frais + vérifier conflit AVANT d'écrire
+  loadResasFromStorage();
+  var hasConflict=false;
+  for(var s=0;s<numSlots;s++){if(DB.reservations[rk(curCI,curCourtI,curDateKey,sM+(s*30))]){hasConflict=true;break;}}
+  if(hasConflict){showMsg('⚠️ Créneau déjà réservé - choisissez une autre heure !');buildSlots();cb.style.display='none';return;}
+
+  // Désactiver le bouton pendant l'envoi (V3-R7)
+  _confirmInFlight=true;
+  var btn=document.getElementById('conf-confirm-btn'); var btnTxt='';
+  if(btn){ btnTxt=btn.textContent; btn.disabled=true; btn.style.opacity='0.6'; btn.textContent='Réservation…'; }
+  function release(){ _confirmInFlight=false; if(btn){ btn.disabled=false; btn.style.opacity=''; btn.textContent=btnTxt; } }
+
+  // ── EN LIGNE : attendre la confirmation du serveur AVANT tout (V3-R1/R2) ──
   if(sbLoaded && cl._id && court._id){
     var total=cl.prices[curDur]||0;
     if(curMachine) total+=cl.machinePrice;
@@ -1276,25 +1290,24 @@ function confirmResa(){
       extras:curExtras.map(function(on,i){return on&&cl.extras[i]?cl.extras[i]:null;}).filter(Boolean),
       total_amount:total, status:'confirmed'
     };
-    sbCreateReservation(resaData).then(function(saved){
-      // Stocker l'ID Supabase pour pouvoir annuler plus tard
-      for(var s=0;s<numSlots;s++){
-        DB.reservationIds[rk(curCI,curCourtI,curDateKey,sM+(s*30))]=saved.id;
+    try{
+      var saved=await sbCreateReservation(resaData);
+      for(var s2=0;s2<numSlots;s2++){
+        DB.reservationIds[rk(curCI,curCourtI,curDateKey,sM+(s2*30))]=saved.id;
       }
-      // Envoyer notification au club via Supabase
-      sbAddNotif(cl._id,'reservation','🎾 Nouvelle réservation',
+      try{ sbAddNotif(cl._id,'reservation','🎾 Nouvelle réservation',
         court.name+' · '+fmtDK(curDateKey)+' · '+tStr(sM)+'-'+tStr(eM),
-        {court:court.name,dateKey:curDateKey,startMin:sM,endMin:eM,player:DB.currentPlayer.name});
-    }).catch(function(e){ console.log('Supabase save failed:',e.message); });
+        {court:court.name,dateKey:curDateKey,startMin:sM,endMin:eM,player:DB.currentPlayer.name}); }catch(e){}
+    }catch(e){
+      // Le serveur a refusé → ne PAS montrer le succès, remettre l'état réel
+      release();
+      showMsg('❌ '+(e.message||'Réservation impossible. Réessaie.'));
+      buildSlots();
+      return;
+    }
   }
 
-  // Recharger l'état le plus frais (les annulations du club peuvent avoir libéré/supprimé des créneaux)
-  loadResasFromStorage();
-  // Vérifier qu'aucun créneau ne chevauche une réservation existante
-  var hasConflict=false;
-  for(var s=0;s<numSlots;s++){if(DB.reservations[rk(curCI,curCourtI,curDateKey,sM+(s*30))]){hasConflict=true;break;}}
-  if(hasConflict){showMsg('⚠️ Créneau déjà réservé - choisissez une autre heure !');buildSlots();document.getElementById('conf-box').style.display='none';return;}
-  // ── Mise à jour locale immédiate ──
+  // ── Confirmé (serveur OK, ou mode hors-ligne) : mise à jour locale + succès ──
   for(var s=0;s<numSlots;s++){
     DB.reservations[rk(curCI,curCourtI,curDateKey,sM+(s*30))]=true;
   }
@@ -1308,7 +1321,8 @@ function confirmResa(){
     addToPlayersList(DB.currentPlayer.name,DB.currentPlayer.phone,DB.currentPlayer.level||'Débutant');
   }
   buildSlots();
-  document.getElementById('conf-box').style.display='none';
+  cb.style.display='none';
+  release();
   gP('p-resa-ok');
 }
 
@@ -1345,9 +1359,10 @@ function addToHistory(clubName,courtInfo,dateStr,startT,endT,ci,coi,dk,sm,em){
   else list.appendChild(h);
 }
 
-function cancelResa(id){
+async function cancelResa(id){
   var el=document.getElementById(id);
   if(!el) return;
+  if(el.dataset.cancelling==='1') return; // anti double-clic
   var ci=parseInt(el.dataset.ci);
   var coi=parseInt(el.dataset.coi);
   var dk=el.dataset.dk;
@@ -1355,11 +1370,15 @@ function cancelResa(id){
   var em=parseInt(el.dataset.em);
   if(!isNaN(ci) && !isNaN(coi) && dk && !isNaN(sm) && !isNaN(em)){
     var numSlots=(em-sm)/30;
-    // ── Annuler dans Supabase si connecté ──
+    // ── EN LIGNE : attendre la confirmation du serveur avant de marquer annulé (V3-R2) ──
     if(sbLoaded){
-      var key=rk(ci,coi,dk,sm);
-      var sbId=DB.reservationIds[key];
-      if(sbId) sbCancelReservation(sbId).catch(function(e){console.log('Cancel failed:',e.message);});
+      var key0=rk(ci,coi,dk,sm);
+      var sbId=DB.reservationIds[key0];
+      if(sbId){
+        el.dataset.cancelling='1';
+        try{ await sbCancelReservation(sbId); }
+        catch(e){ el.dataset.cancelling=''; showMsg('❌ '+(e.message||'Annulation impossible. Réessaie.')); return; }
+      }
     }
     // Recharger l'état le plus frais avant de modifier (évite d'écraser d'autres changements)
     loadResasFromStorage();
