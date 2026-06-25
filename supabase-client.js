@@ -135,7 +135,10 @@ async function sbCreateReservation(resa) {
     res = await sb.from('reservations').insert([resa]).select().single();
   }
   if (res.error) {
-    if (res.error.code === '23505') throw new Error('Ce créneau est déjà réservé par quelqu\'un d\'autre !');
+    // 23505 = unique violation ; 23P01 = exclusion (chevauchement de créneaux) — V3-D1
+    if (res.error.code === '23505' || res.error.code === '23P01') {
+      throw new Error('Ce créneau est déjà réservé par quelqu\'un d\'autre !');
+    }
     throw new Error(res.error.message);
   }
   return res.data;
