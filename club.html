@@ -1752,7 +1752,9 @@ function cpDrawList(supaResas){
     var td=document.createElement('div');td.style.cssText='text-align:center;min-width:42px;flex-shrink:0';
     td.innerHTML='<div style="font-size:13px;font-weight:800;color:#fff">'+item.startT+'</div><div style="font-size:9px;color:#445;margin-top:1px">→ '+item.endT+'</div>';
     var inf=document.createElement('div');inf.style.flex='1';
-    inf.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(item.player)+'</div>'+
+    var nsC=cpNoShowCount(item.player);
+    inf.innerHTML='<div style="font-size:12px;font-weight:700;color:#fff">'+esc(item.player)+
+        (nsC>0?' <span style="font-size:9px;color:#E0A04A;font-weight:700">⚠️ '+nsC+' abs.</span>':'')+'</div>'+
       '<div style="font-size:10px;color:var(--lime);margin-top:2px">🎾 '+esc(item.court)+'</div>'+
       (item.phone?'<div style="font-size:10px;color:#556;margin-top:1px">📱 '+esc(item.phone)+'</div>':'');
     var right=document.createElement('div');right.style.cssText='display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0';
@@ -1764,7 +1766,11 @@ function cpDrawList(supaResas){
     cancelBtn.style.cssText='font-size:9px;padding:3px 8px;border-radius:5px;background:#FCEBEB;color:#791F1F;border:none;cursor:pointer;font-weight:700';
     cancelBtn.textContent='✕ Annuler';
     (function(it,cardEl){cancelBtn.onclick=function(){cpConfirmCancel(it,cardEl);};})(item,card);
-    right.appendChild(badge);right.appendChild(cancelBtn);
+    var nsBtn=document.createElement('button');
+    nsBtn.style.cssText='font-size:9px;padding:3px 8px;border-radius:5px;background:#3A2A0A;color:#E0A04A;border:none;cursor:pointer;font-weight:700';
+    nsBtn.textContent='⚠️ Absent';
+    (function(it,cardEl){nsBtn.onclick=function(){cpConfirmNoShow(it,cardEl);};})(item,card);
+    right.appendChild(badge);right.appendChild(cancelBtn);right.appendChild(nsBtn);
     card.appendChild(td);card.appendChild(inf);card.appendChild(right);
     list.appendChild(card);
   });
@@ -1796,16 +1802,42 @@ function cpConfirmCancel(item,cardEl){
   cardEl.style.flexWrap='wrap';cardEl.appendChild(box);
 }
 
-// Annuler une réservation → libère le créneau dans l'app
-async function cpCancelResa(item){
+// Confirmation avant de marquer une absence (no-show)
+function cpConfirmNoShow(item,cardEl){
+  var ex=cardEl.querySelector('.cancel-confirm');
+  if(ex){ex.remove();return;}
+  var box=document.createElement('div');box.className='cancel-confirm';
+  box.style.cssText='width:100%;margin-top:7px;padding:8px;background:#241A08;border-radius:7px;border:1px solid #4A3A1A';
+  box.innerHTML='<div style="font-size:11px;color:#E0A04A;margin-bottom:6px">Marquer '+esc(item.player)+' comme ABSENT ? Le créneau sera libéré et l\'absence comptée.</div>';
+  var yes=document.createElement('button');yes.style.cssText='font-size:11px;padding:5px 12px;border-radius:6px;background:#8A5A1A;color:#fff;border:none;cursor:pointer;font-weight:700;margin-right:6px';yes.textContent='✓ Oui, absent';
+  yes.onclick=function(){cpCancelResa(item,{noShow:true});};
+  var no=document.createElement('button');no.style.cssText='font-size:11px;padding:5px 10px;border-radius:6px;background:#2A3444;color:var(--dim2);border:none;cursor:pointer';no.textContent='Non';
+  no.onclick=function(){box.remove();};
+  box.appendChild(yes);box.appendChild(no);
+  cardEl.style.flexWrap='wrap';cardEl.appendChild(box);
+}
+
+// Compteur d'absences (no-show) par joueur — V3-P1 (compter sans bloquer)
+function cpNoShowMap(){ try{ return JSON.parse(localStorage.getItem('pg_noshow')||'{}'); }catch(e){ return {}; } }
+function cpNoShowCount(name){ var m=cpNoShowMap(); return (name&&m[name])?m[name]:0; }
+function cpAddNoShow(name){ if(!name) return 0; var m=cpNoShowMap(); m[name]=(m[name]||0)+1; try{ localStorage.setItem('pg_noshow',JSON.stringify(m)); }catch(e){} return m[name]; }
+
+// Annuler une réservation (ou marquer absent) → libère le créneau
+// opts.noShow = true : enregistre une absence et NE notifie PAS les joueurs.
+async function cpCancelResa(item, opts){
+  opts=opts||{};
   var cl=DB.clubs[cpCI];
   // ── EN LIGNE : attendre la confirmation du serveur AVANT de libérer localement (V3-R2) ──
   if(sbLoaded && item._id){
     try{ await sbCancelReservation(item._id); }
     catch(e){ showMsg('❌ '+(e.message||'Annulation impossible. Réessaie.')); return; }
   }
-  // 🔔 Prévenir tous les joueurs qu'un créneau s'est libéré
-  if(sbLoaded && typeof sbPushNotif==='function'){
+  var nsTotal=0;
+  if(opts.noShow){
+    nsTotal=cpAddNoShow(item.player);
+    try{ if(typeof pgTrack==='function') pgTrack('no_show',{club:cl.name,player:item.player}); }catch(e){}
+  } else if(sbLoaded && typeof sbPushNotif==='function'){
+    // 🔔 Prévenir tous les joueurs qu'un créneau s'est libéré (annulation normale seulement)
     try{ sbPushNotif({ type:'cancel_club', audience:'all_players',
       title:'🔓 Créneau libéré !',
       body:(cl.name||'Un club')+' — '+item.court+' le '+(item.dateDisplay||item.date)+' à '+item.startT+' est de nouveau disponible.' }); }catch(e){}
@@ -1835,7 +1867,8 @@ async function cpCancelResa(item){
     }
   }
   cpRenderAll();
-  showMsg('✅ Réservation annulée — créneau libéré');
+  if(opts.noShow) showMsg('⚠️ Absence enregistrée pour '+item.player+' (total : '+nsTotal+')');
+  else showMsg('✅ Réservation annulée — créneau libéré');
 }
 function cpBuildStartHours(){
   var cl = DB.clubs[cpCI];
