@@ -14,6 +14,7 @@
 <link rel="icon" href="./icon-192.png" type="image/png">
 <!-- Config locale (gitignored) -->
 <script src="./config.js"></script>
+<script src="./analytics.js"></script>
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="./supabase-client.js"></script>
@@ -1672,6 +1673,7 @@ async function doRegister(){
     var acc=await accountFromSupabase(r.user||{email:em,user_metadata:{name:fullName,phone:ph,level:level,hidePhone:hidePhone}});
     applyAccount(acc);
     gP('p-home');
+    try{ if(typeof pgTrack==='function') pgTrack('signup',{level:level}); }catch(e){}
     showMsg('✅ Compte créé ! Bienvenue '+fn+' !');
     return;
   }
