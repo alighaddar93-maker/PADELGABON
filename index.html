@@ -1324,6 +1324,12 @@ async function confirmResa(){
   buildSlots();
   cb.style.display='none';
   release();
+  try{ if(typeof pgTrack==='function') pgTrack('booking_completed',{club:cl.name,duration:curDur,online:!!(sbLoaded&&cl._id)}); }catch(e){}
+  // V3-P4 : confirmation WhatsApp (no-op si non configuré)
+  try{ if(typeof sbNotifyBookingWhatsapp==='function') sbNotifyBookingWhatsapp({
+    phone:DB.currentPlayer.phone||'', player:DB.currentPlayer.name||'Joueur',
+    club:cl.name, court:court.name, date:fmtDK(curDateKey), start:tStr(sM), end:tStr(eM),
+    code:document.getElementById('s-code').textContent }); }catch(e){}
   gP('p-resa-ok');
 }
 

@@ -584,4 +584,23 @@ function sbWatchMyNotifs(cb) {
   } catch (e) { return null; }
 }
 
+// ============================================
+// V3-P4 — Confirmation WhatsApp (canal app fermée)
+// ============================================
+// Envoie une confirmation de réservation par WhatsApp via une Edge Function
+// Supabase (qui détient le token WhatsApp Business API côté serveur).
+// NO-OP tant que config.whatsappEndpoint n'est pas défini → zéro risque.
+//   config.js : { ..., whatsappEndpoint:'https://<projet>.functions.supabase.co/whatsapp-booking' }
+async function sbNotifyBookingWhatsapp(details) {
+  var ep = _cfg.whatsappEndpoint;
+  if (!ep || !details || !details.phone) return;
+  try {
+    await fetch(ep, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
+      body: JSON.stringify(details)
+    });
+  } catch (e) { /* silencieux : la confirmation in-app reste la source sûre */ }
+}
+
 console.log('✅ PadelGabon — Supabase client chargé');
