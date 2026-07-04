@@ -41,7 +41,7 @@ Tout se synchronise maintenant entre téléphones : clubs, réservations, tourno
 ## 🔐 ÉTAPE 2 — SÉCURITÉ (vraie auth + RLS) — ✅ TERMINÉE (testée en ligne)
 Choix du proprio : **tout le monde a un vrai compte** (email + mot de passe Supabase Auth), joueurs inclus.
 - ✅ SQL lancés : `supabase-auth.sql` (profiles+rôles), `supabase-lists.sql` (app_lists), `supabase-rls.sql` (verrouillage). Tous = Success.
-- ✅ « Confirm email » désactivé. Admin promu (`role='admin'`).
+- Admin promu (`role='admin'`). Round 4 : « Confirm email » **réactivé** (V4-05) — penser à régler Site URL sur l'URL Netlify.
 - ✅ Accès club créable **depuis l'admin** (fiche club → « 👤 Accès club ») via `sbCreateClubAccount` (client secondaire pour ne pas déconnecter l'admin). Pas besoin d'aller dans Supabase.
 - ✅ Admin en ligne = SEUL l'email admin entre (mot de passe `padel2026` ne marche plus qu'en local/tests).
 - ✅ Testé en prod : admin modifie club, joueur réserve+annule, club annule → OK.
@@ -53,7 +53,7 @@ Choix du proprio : **tout le monde a un vrai compte** (email + mot de passe Supa
   - `supabase-client.js` : helpers `sbSignUp/sbSignIn/sbSignOut/sbGetUser/sbGetProfile/sbResetPassword` + session persistée.
   - Réservations : `user_id` marqué à la création (pour annulation par le joueur sous RLS).
 - ⚙️ **SQL à lancer (dans l'ordre)** : `supabase-auth.sql` (table `profiles` + rôles), PUIS — une fois la connexion testée — `supabase-rls.sql` (verrouillage par rôle).
-- ⚙️ **Dans Supabase** : Authentication → Providers → Email → DÉSACTIVER « Confirm email » (sinon friction inscription).
+- ⚙️ **Round 4 (sécurité)** : lancer `supabase-v4-privacy.sql` (ferme les fuites V4-02/V4-06), réactiver « Confirm email » + régler **Site URL** = URL Netlify (V4-05).
 - ⚙️ **Promouvoir l'admin** : crée ton compte via l'app joueur, puis `update profiles set role='admin' where email='...';`
 - ⚙️ **Rattacher un club** : `update profiles set role='club', club_id='<uuid>' where email='...';`
 - ⏳ RESTE : tester les connexions en ligne sur téléphone, puis appliquer `supabase-rls.sql`.
