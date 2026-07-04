@@ -13,8 +13,11 @@ WhatsApp de confirmation après chaque réservation (canal qui marche **app ferm
 ## Étapes
 1. Mets les secrets côté serveur (jamais dans l'app) :
    ```
-   supabase secrets set WHATSAPP_TOKEN=ton_token WHATSAPP_PHONE_ID=ton_phone_id
+   supabase secrets set WHATSAPP_TOKEN=ton_token WHATSAPP_PHONE_ID=ton_phone_id APP_ORIGIN=https://tubular-dodol-2803cb.netlify.app
    ```
+   (La fonction est sécurisée V4-01 : elle exige le jeton du joueur connecté et
+   vérifie que la réservation lui appartient avant d'envoyer. Le client n'envoie
+   que `reservation_id`.)
 2. Déploie la fonction :
    ```
    supabase functions deploy whatsapp-booking
