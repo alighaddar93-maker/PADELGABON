@@ -8,8 +8,8 @@
 <!-- Config locale (gitignored) -->
 <script src="./config.js"></script>
 <script src="./analytics.js"></script>
-<!-- Supabase -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Supabase (auto-hébergé, version figée — V4-03 pas de dépendance CDN) -->
+<script src="./vendor/supabase.min.js"></script>
 <script src="./supabase-client.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -1013,8 +1013,7 @@ function renderAdminClubs(){
       }else{
         ac++;
         main.innerHTML='<div class="cdot" style="background:var(--lime)"></div>'+
-          '<div class="cinfo"><div class="cname-a">'+esc(c.name)+'</div><div class="cmeta">'+esc(c.loc)+' · '+c.courts.length+' courts · '+c.openFrom+'h-'+c.openTo+'h</div>'+
-          '<div class="cmeta" style="color:var(--lime);font-weight:700">🔑 Code club : '+esc(String(c.accessCode||'1234'))+'</div></div>';
+          '<div class="cinfo"><div class="cname-a">'+esc(c.name)+'</div><div class="cmeta">'+esc(c.loc)+' · '+c.courts.length+' courts · '+c.openFrom+'h-'+c.openTo+'h</div></div>';
         var acts=document.createElement('div');acts.style='display:flex;gap:4px';
         var ge=document.createElement('button');ge.className='be';ge.textContent='Gérer';ge.onclick=function(){openEditClub(idx);};
         var sp=document.createElement('button');sp.style.cssText='font-size:10px;padding:3px 7px;border-radius:5px;background:#FAEEDA;color:#633806;border:none;cursor:pointer;font-weight:600';sp.textContent='⏸';
@@ -1091,7 +1090,6 @@ function openEditClub(ci){
   mkRow('Prix 1h30 (XAF)','ep-90',c.prices[90],'number');
   mkRow('Prix 2h (XAF)','ep-120',c.prices[120],'number');
   mkRow('💳 Abonnement du club /mois (XAF)','ep-abo',c.abo||25000,'number');
-  mkRow('🔑 Code d\'accès du club','ep-code',c.accessCode||'1234','text');
   // ── Accès club EN LIGNE (compte email + mot de passe) ──
   var acL=document.createElement('div');acL.className='afl';acL.style.marginTop='8px';acL.textContent='👤 Accès club (connexion en ligne)';sh.appendChild(acL);
   var acBox=document.createElement('div');acBox.style.cssText='background:#16202E;border:1px solid #2A3444;border-radius:8px;padding:8px;margin-bottom:6px';
@@ -1254,7 +1252,6 @@ function saveClub(ci){
   }
   var ph=document.getElementById('ec-img');if(ph)c.photo=ph.value;
   var ab=document.getElementById('ep-abo');if(ab)c.abo=parseInt(ab.value)||c.abo||25000;
-  var cc=document.getElementById('ep-code');if(cc&&cc.value.trim())c.accessCode=cc.value.trim();
   var p6=document.getElementById('ep-60');if(p6)c.prices[60]=parseInt(p6.value)||0;
   var p9=document.getElementById('ep-90');if(p9)c.prices[90]=parseInt(p9.value)||0;
   var p12=document.getElementById('ep-120');if(p12)c.prices[120]=parseInt(p12.value)||0;

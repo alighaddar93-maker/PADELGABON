@@ -15,8 +15,8 @@
 <!-- Config locale (gitignored) -->
 <script src="./config.js"></script>
 <script src="./analytics.js"></script>
-<!-- Supabase -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Supabase (auto-hébergé, version figée — V4-03 pas de dépendance CDN) -->
+<script src="./vendor/supabase.min.js"></script>
 <script src="./supabase-client.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -282,7 +282,7 @@ input:focus,select:focus,textarea:focus{ border-color:var(--turq)!important;outl
 #p-home #pub-carousel-top,#p-home #pub-carousel-bot,#p-home #pub-end-list{ padding:0 14px;margin-top:12px }
 .hcard{ margin:0 14px 14px;background:var(--surf)!important;border:1px solid var(--bd);border-radius:20px;overflow:hidden;cursor:pointer;box-shadow:var(--shadow);transition:transform .14s,border-color .14s }
 .hcard:active{ transform:scale(.985);border-color:var(--turq) }
-.hphoto{ height:128px;position:relative;background:linear-gradient(135deg,#21303B,#141B22);display:flex;align-items:center;justify-content:center;font-size:44px }
+.hphoto{ height:92px;position:relative;background:linear-gradient(135deg,#21303B,#141B22);display:flex;align-items:center;justify-content:center;font-size:44px }
 .hphoto img{ width:100%;height:100%;object-fit:cover;display:block }
 .hphoto::after{ content:'';position:absolute;inset:0;background:linear-gradient(transparent 45%,rgba(7,13,12,.85)) }
 .hphoto .hbadge{ position:absolute;top:11px;left:11px;z-index:2;background:rgba(8,14,13,.55);backdrop-filter:blur(6px);color:#fff;font-size:10px;font-weight:800;padding:5px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.12) }
@@ -1051,9 +1051,9 @@ function loadClub(){
   document.getElementById('extras-sec').style.display='none';
   buildCalendar();
   buildCourtTabs();
-  // Rafraîchir les créneaux déjà réservés depuis Supabase (vue à jour pour le joueur)
-  if(sbLoaded && cl._id && typeof sbLoadAllClubReservations==='function'){
-    sbLoadAllClubReservations(cl._id).then(function(resas){
+  // Rafraîchir les créneaux pris depuis la vue publique SANS données perso (V4-02)
+  if(sbLoaded && cl._id && typeof sbLoadAvailability==='function'){
+    sbLoadAvailability(cl._id).then(function(resas){
       (resas||[]).forEach(function(r){
         if(r.status && r.status!=='confirmed') return;
         var coi=cl.courts.findIndex(function(c){return c._id===r.court_id;}); if(coi<0) return;
@@ -1325,11 +1325,9 @@ async function confirmResa(){
   cb.style.display='none';
   release();
   try{ if(typeof pgTrack==='function') pgTrack('booking_completed',{club:cl.name,duration:curDur,online:!!(sbLoaded&&cl._id)}); }catch(e){}
-  // V3-P4 : confirmation WhatsApp (no-op si non configuré)
-  try{ if(typeof sbNotifyBookingWhatsapp==='function') sbNotifyBookingWhatsapp({
-    phone:DB.currentPlayer.phone||'', player:DB.currentPlayer.name||'Joueur',
-    club:cl.name, court:court.name, date:fmtDK(curDateKey), start:tStr(sM), end:tStr(eM),
-    code:document.getElementById('s-code').textContent }); }catch(e){}
+  // V3-P4 : confirmation WhatsApp — envoie seulement l'ID (le serveur vérifie
+  // l'appartenance et construit le message). No-op si non configuré / hors-ligne.
+  try{ if(typeof sbNotifyBookingWhatsapp==='function' && typeof saved!=='undefined' && saved && saved.id) sbNotifyBookingWhatsapp(saved.id); }catch(e){}
   gP('p-resa-ok');
 }
 
@@ -2300,14 +2298,9 @@ function cpInit(){
 }
 
 function cpLogin(){
-  var idx = parseInt(document.getElementById('cp-club-select').value);
-  var code = document.getElementById('cp-code').value.trim();
-  if(!code){ showMsg('Entre le code !'); return; }
-  if(code !== '1234'){ showMsg('Code incorrect !'); return; }
-  cpCI = idx;
-  document.getElementById('club-panel-login').style.display = 'none';
-  document.getElementById('club-panel-dash').style.display = 'block';
-  cpLoadDash();
+  // Le panneau club vit dans club.html (connexion par email + mot de passe Supabase).
+  // Aucun code d'accès en dur ici (V4-06 / Part C) — fail-closed.
+  showMsg('Accès club : ouvre la page club et connecte-toi avec ton email.');
 }
 
 function cpLogout(){
@@ -3223,7 +3216,7 @@ function buildCarousel(containerId, pubs){
       var hasText=(p.n&&p.n.trim())||(p.cl&&p.cl.trim());
       // Pub avec photo
       html+='<div class="carousel-slide'+(i===0?' active':'')+'" style="border-radius:10px;overflow:hidden;cursor:pointer;position:relative">'+
-        '<img src="'+p.img+'" style="width:100%;height:'+(hasText?'90px':'110px')+';object-fit:cover;display:block">'+
+        '<img src="'+p.img+'" style="width:100%;height:'+(hasText?'120px':'150px')+';object-fit:cover;display:block">'+
         '<div style="position:absolute;top:6px;right:7px;font-size:9px;color:#fff;background:rgba(0,0,0,.5);padding:1px 5px;border-radius:4px">Sponsorisé</div>'+
         // Texte uniquement si titre/nom fournis (sinon photo seule)
         (hasText?'<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);padding:5px 9px">'+
@@ -3776,8 +3769,8 @@ async function initSupabase(){
         try{ renderHomeClubs(); }catch(e){}
       }
     }
-    // 2. Charger les réservations existantes
-    var resas=await sbLoadReservations();
+    // 2. Charger les créneaux pris depuis la vue publique SANS données perso (V4-02)
+    var resas=await sbLoadAvailability();
     resas.forEach(function(r){
       var ci=DB.clubs.findIndex(function(c){return c._id===r.club_id;});
       if(ci<0) return;

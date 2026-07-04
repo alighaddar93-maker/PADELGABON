@@ -243,7 +243,7 @@ create policy "profiles_admin_all" on public.profiles
   for all using ( public.is_admin() ) with check ( public.is_admin() );
 
 -- CATALOGUE : lecture publique, écriture admin
-create policy "clubs_read"        on public.clubs       for select using (true);
+-- clubs : PAS de lecture publique de la table (access_code secret) — public via la vue clubs_public (V4-06)
 create policy "clubs_admin"       on public.clubs       for all using (public.is_admin()) with check (public.is_admin());
 create policy "courts_read"       on public.courts      for select using (true);
 create policy "courts_admin"      on public.courts      for all using (public.is_admin()) with check (public.is_admin());
@@ -260,7 +260,8 @@ create policy "treg_insert" on public.tournament_registrations for insert with c
 create policy "treg_admin"  on public.tournament_registrations for all using (public.is_admin()) with check (public.is_admin());
 
 -- RESERVATIONS : insert lie a auth.uid() (V3-S3) ; update/delete proprietaire ou club
-create policy "resa_read"   on public.reservations for select using (true);
+create policy "resa_read_own_or_club" on public.reservations for select
+  using ( user_id = auth.uid() or public.can_manage_club(club_id) );
 create policy "resa_insert" on public.reservations for insert with check ( user_id = auth.uid() );
 create policy "resa_update" on public.reservations for update
   using ( user_id = auth.uid() or public.can_manage_club(club_id) )
@@ -299,6 +300,20 @@ do $$ begin
   begin alter publication supabase_realtime add table public.club_notifications; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.notifications; exception when duplicate_object then null; end;
 end $$;
+
+-- ============================================================ VUES PUBLIQUES (sans données sensibles) — V4-02 / V4-06
+-- Appartiennent à postgres → contournent le RLS et n'exposent que des colonnes sûres.
+create or replace view public.slot_availability as
+  select id, club_id, court_id, date_key, start_minutes, end_minutes, status
+  from public.reservations where status = 'confirmed';
+grant select on public.slot_availability to anon, authenticated;
+
+create or replace view public.clubs_public as
+  select id, name, location, open_from, open_to, price_60, price_90, price_120,
+         has_machine, machine_price, machine_balls, extras, is_active, is_suspended,
+         suspended_reason, subscription_status, payment_phone, payment_provider, abo, photo, created_at
+  from public.clubs;
+grant select on public.clubs_public to anon, authenticated;
 
 notify pgrst, 'reload schema';
 -- ✅ Base PadelGabon prête (schéma canonique, RLS sécurisée).

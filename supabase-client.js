@@ -38,10 +38,11 @@ if (sb) {
 // CLUBS
 // ============================================
 async function sbLoadClubs() {
-  // Charger clubs
-  const { data: clubs, error: e1 } = await sb
-    .from('clubs').select('*').eq('is_active', true).order('name');
-  if (e1) { console.error('sbLoadClubs:', e1.message); return null; }
+  // Vue publique SANS access_code (V4-06). Repli sur la table si la vue n'existe pas encore.
+  let r = await sb.from('clubs_public').select('*').eq('is_active', true).order('name');
+  if (r.error) r = await sb.from('clubs').select('*').eq('is_active', true).order('name');
+  if (r.error) { console.error('sbLoadClubs:', r.error.message); return null; }
+  const clubs = r.data;
   // Charger courts séparément
   const { data: courts, error: e2 } = await sb
     .from('courts').select('*').order('sort_order');
@@ -107,6 +108,16 @@ async function sbLoadReservations(clubId, dateKey) {
   if (dateKey) q = q.eq('date_key', dateKey);
   const { data, error } = await q.order('start_minutes');
   if (error) { console.error('sbLoadReservations:', error.message); return []; }
+  return data;
+}
+
+// Disponibilité publique SANS données perso (V4-02) — pour la grille de créneaux du joueur.
+// Lit la vue slot_availability (court_id, date_key, minutes, status) ; jamais player_name/phone.
+async function sbLoadAvailability(clubId) {
+  let q = sb.from('slot_availability').select('*').eq('status', 'confirmed');
+  if (clubId) q = q.eq('club_id', clubId);
+  const { data, error } = await q.order('start_minutes');
+  if (error) { console.error('sbLoadAvailability:', error.message); return []; }
   return data;
 }
 
@@ -591,14 +602,19 @@ function sbWatchMyNotifs(cb) {
 // Supabase (qui détient le token WhatsApp Business API côté serveur).
 // NO-OP tant que config.whatsappEndpoint n'est pas défini → zéro risque.
 //   config.js : { ..., whatsappEndpoint:'https://<projet>.functions.supabase.co/whatsapp-booking' }
-async function sbNotifyBookingWhatsapp(details) {
+async function sbNotifyBookingWhatsapp(reservationId) {
   var ep = _cfg.whatsappEndpoint;
-  if (!ep || !details || !details.phone) return;
+  if (!ep || !reservationId || !sb) return;
   try {
+    // Envoie le JETON du joueur connecté (pas la clé anon) — la fonction serveur
+    // vérifie que la réservation lui appartient avant d'envoyer (V4-01).
+    const { data: s } = await sb.auth.getSession();
+    const token = s && s.session ? s.session.access_token : null;
+    if (!token) return;
     await fetch(ep, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
-      body: JSON.stringify(details)
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ reservation_id: reservationId })
     });
   } catch (e) { /* silencieux : la confirmation in-app reste la source sûre */ }
 }
