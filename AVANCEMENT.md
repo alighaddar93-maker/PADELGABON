@@ -45,7 +45,7 @@ Choix du proprio : **tout le monde a un vrai compte** (email + mot de passe Supa
 - ✅ Accès club créable **depuis l'admin** (fiche club → « 👤 Accès club ») via `sbCreateClubAccount` (client secondaire pour ne pas déconnecter l'admin). Pas besoin d'aller dans Supabase.
 - ✅ Admin en ligne = SEUL l'email admin entre (mot de passe `padel2026` ne marche plus qu'en local/tests).
 - ✅ Testé en prod : admin modifie club, joueur réserve+annule, club annule → OK.
-- Déployé sur Netlify : https://tubular-dodol-2803cb.netlify.app (admin = /admin.html, club = /club.html).
+- Déployé sur Netlify : https://padel-gabon.netlify.app (admin = /admin.html, club = /club.html).
 - ✅ Code branché sur les 3 pages :
   - Joueur (`index.html`) : inscription/connexion via Supabase Auth (repli local si hors-ligne/tests). Session restaurée au démarrage (saute le splash).
   - Admin (`admin.html`) : connexion email + mot de passe, vérifie `role='admin'`. Repli mot de passe `padel2026` hors-ligne/tests.
