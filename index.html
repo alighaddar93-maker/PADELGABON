@@ -375,9 +375,67 @@ window.addEventListener('storage',function(e){if(e.key==='pg_theme')applyTheme()
     <input type="checkbox" id="rg-hidephone" style="width:18px;height:18px;cursor:pointer">
     <span style="font-size:12px;color:var(--dim)">🔒 Masquer mon numéro aux autres joueurs</span>
   </label>
+  <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 2px">
+    <input type="checkbox" id="rg-consent" style="width:18px;height:18px;cursor:pointer;flex-shrink:0;margin-top:1px">
+    <span style="font-size:12px;color:var(--dim);line-height:1.4">J'accepte la <span style="color:var(--lime);font-weight:700;cursor:pointer;text-decoration:underline" onclick="gP('p-legal')">politique de confidentialité et les CGU</span> de PadelGabon.</span>
+  </div>
   <button class="btn btng" onclick="doRegister()">Créer mon compte</button>
-  <div style="font-size:11px;color:var(--dim2);text-align:center">Tu acceptes les conditions PadelGabon.</div>
   <div style="font-size:12px;color:var(--dim);text-align:center">Déjà inscrit ? <span style="color:var(--lime);font-weight:700;cursor:pointer" onclick="gP('p-login')">Se connecter</span></div>
+</div>
+</div>
+
+<!-- ÉCRAN LÉGAL : Confidentialité + CGU + Aide (V4-P9) -->
+<div class="pg" id="p-legal">
+<div class="tb tbg">
+  <button class="bback" onclick="gP((typeof DB!=='undefined'&&DB.currentPlayer&&DB.currentPlayer.name&&DB.currentPlayer.name!=='Joueur')?'p-profile':'p-splash')">← Retour</button>
+  <h2 style="font-size:14px;font-weight:800;color:#fff">Confidentialité &amp; CGU</h2>
+</div>
+<div class="scr" style="padding:14px 16px 30px;line-height:1.55">
+
+  <div style="background:var(--surf);border-radius:12px;padding:14px;margin-bottom:14px">
+    <div style="font-size:15px;font-weight:800;color:var(--lime);margin-bottom:8px">🛟 Aide / Contact</div>
+    <div style="font-size:13px;color:var(--txt);margin-bottom:10px">Une question, un problème ? Écris-nous sur WhatsApp, on répond vite.</div>
+    <a href="https://wa.me/241062571139?text=Bonjour,%20j'ai%20besoin%20d'aide%20avec%20PadelGabon" target="_blank" rel="noopener"
+       style="display:inline-flex;align-items:center;gap:8px;background:#1DA851;color:#fff;text-decoration:none;font-weight:800;font-size:14px;padding:11px 16px;border-radius:10px">💬 Contacter le support WhatsApp</a>
+    <div style="font-size:12px;color:var(--dim);margin-top:8px">📞 +241 06 25 71 139</div>
+  </div>
+
+  <div style="font-size:16px;font-weight:800;color:#fff;margin:6px 0 8px">🔒 Politique de confidentialité</div>
+  <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Dernière mise à jour : 2026. PadelGabon respecte la loi gabonaise sur la protection des données personnelles (Ordonnance n°00009/PR/2011, CNPDCP).</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">1. Données que nous collectons</div>
+  <div style="font-size:13px;color:var(--txt)">Nom et prénom, numéro de téléphone, adresse email, niveau de jeu et, si tu en ajoutes une, une photo de profil. Lors d'une réservation : le créneau, le court et le club choisis.</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">2. Pourquoi nous les utilisons</div>
+  <div style="font-size:13px;color:var(--txt)">Uniquement pour faire fonctionner le service : créer ton compte, gérer tes réservations, et permettre au club où tu réserves de te reconnaître et te contacter en cas de besoin. Nous n'utilisons pas tes données à d'autres fins.</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">3. Qui y a accès</div>
+  <div style="font-size:13px;color:var(--txt)">Seul le <b>club où tu réserves</b> voit ton nom et ton téléphone pour cette réservation. Les autres joueurs ne voient jamais ton numéro (et pas du tout si tu coches « masquer mon numéro »). Nous ne vendons ni ne louons tes données à personne.</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">4. Conservation</div>
+  <div style="font-size:13px;color:var(--txt)">Tes données sont conservées tant que ton compte existe. Tu peux demander leur suppression à tout moment.</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">5. Tes droits</div>
+  <div style="font-size:13px;color:var(--txt)">Tu peux consulter, corriger ou faire supprimer tes données personnelles (droit d'accès, de rectification et de suppression). Pour cela, écris-nous sur le WhatsApp support ci-dessus.</div>
+
+  <div style="font-size:16px;font-weight:800;color:#fff;margin:20px 0 8px">📜 Conditions Générales d'Utilisation</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">1. Le service</div>
+  <div style="font-size:13px;color:var(--txt)">PadelGabon met en relation des joueurs et des clubs de padel au Gabon pour réserver des créneaux. PadelGabon n'est pas propriétaire des clubs et ne gère pas les terrains.</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">2. Paiement</div>
+  <div style="font-size:13px;color:var(--txt)">Le paiement des réservations se fait <b>sur place, au club</b>. L'application ne prélève pas d'argent pour les réservations.</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">3. Réservations et absences</div>
+  <div style="font-size:13px;color:var(--txt)">Tu t'engages à venir aux créneaux que tu réserves, ou à annuler si tu ne peux pas venir. Le club peut noter une absence (« no-show »). Des absences répétées peuvent limiter ton accès à la réservation.</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">4. Ton engagement</div>
+  <div style="font-size:13px;color:var(--txt)">Tu fournis des informations exactes, tu utilises l'application de bonne foi et tu respectes les clubs et les autres joueurs.</div>
+
+  <div style="font-size:13px;font-weight:700;color:var(--lime);margin-top:12px">5. Responsabilité</div>
+  <div style="font-size:13px;color:var(--txt)">PadelGabon fait de son mieux pour un service fiable mais ne peut être tenu responsable d'un litige entre un joueur et un club, ni d'une indisponibilité ponctuelle du service.</div>
+
+  <div style="font-size:11px;color:var(--dim2);margin-top:18px">Ce document est une version de base et pourra être complété. Pour toute question : WhatsApp support ci-dessus.</div>
 </div>
 </div>
 
@@ -782,6 +840,8 @@ window.addEventListener('storage',function(e){if(e.key==='pg_theme')applyTheme()
   <div class="lbl">Mes activités</div>
   <div class="card" style="color:#fff;font-weight:600" onclick="gP('p-history')">📋 Mes réservations <span style="float:right;color:var(--dim2)">→</span></div>
   <div class="card" style="color:#fff;font-weight:600" onclick="gP('p-notifs')">🔔 Notifications <span style="float:right;color:var(--dim2)">→</span></div>
+  <a class="card" href="https://wa.me/241062571139?text=Bonjour,%20j'ai%20besoin%20d'aide%20avec%20PadelGabon" target="_blank" rel="noopener" style="display:block;color:#fff;font-weight:600;text-decoration:none">🛟 Aide / Contact <span style="float:right;color:var(--dim2)">WhatsApp →</span></a>
+  <div class="card" style="color:#fff;font-weight:600" onclick="gP('p-legal')">🔒 Confidentialité &amp; CGU <span style="float:right;color:var(--dim2)">→</span></div>
   <button class="btn" style="background:#FCEBEB;color:#791F1F;margin-top:0" onclick="doLogout()" data-i18n="btn-logout">Se déconnecter</button>
 </div>
 <div class="nav">
@@ -1652,6 +1712,8 @@ async function doRegister(){
   var lv=document.getElementById('rg-lv').value;
   var ph=document.getElementById('rg-ph').value.trim();
   var hidePhone=document.getElementById('rg-hidephone')?document.getElementById('rg-hidephone').checked:false;
+  var consent=document.getElementById('rg-consent');
+  if(consent && !consent.checked){showMsg('Coche la case pour accepter la politique de confidentialité et les CGU.');return;}
   if(!fn||!em||!pw){showMsg('Remplis prénom, email et mot de passe !');return;}
   if(!isValidEmail(em)){showMsg('❌ Email invalide (ex: nom@gmail.com)');return;}
   if(pw.length<6){showMsg('Mot de passe : minimum 6 caractères');return;}

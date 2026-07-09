@@ -6,3 +6,4 @@ playwright-report/
 test-results/
 screenshots/
 config.js
+.claude/
