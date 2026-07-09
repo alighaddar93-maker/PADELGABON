@@ -2297,12 +2297,6 @@ function cpInit(){
   if(prevVal) sel.value = prevVal;
 }
 
-function cpLogin(){
-  // Le panneau club vit dans club.html (connexion par email + mot de passe Supabase).
-  // Aucun code d'accès en dur ici (V4-06 / Part C) — fail-closed.
-  showMsg('Accès club : ouvre la page club et connecte-toi avec ton email.');
-}
-
 function cpLogout(){
   cpCI = -1;
   document.getElementById('cp-code').value = '';
@@ -3634,7 +3628,7 @@ fr:{
   'unpaid':'⚠️ Impayés',
   'cp-title':'Accès Club','cp-subtitle':'Connecte-toi avec le code de ton club',
   'cp-select-club':'Sélectionner ton club','cp-access-code':"Code d'accès",
-  'cp-default-code':'Code par défaut : 1234','btn-cp-login':'Se connecter',
+  'btn-cp-login':'Se connecter',
   'cp-tab-resa':'Résa','cp-tab-notifs':'Notifs','cp-tab-block':'Bloc.','cp-tab-courts':'Courts',
   'cp-block-title':'🔒 Bloquer un créneau','cp-block-desc':'Pour les réservations par téléphone',
   'btn-block-slot':'🔒 Bloquer ce créneau','btn-unblock':'🔓 Libérer',
@@ -3692,7 +3686,7 @@ en:{
   'unpaid':'⚠️ Unpaid',
   'cp-title':'Club Access','cp-subtitle':'Sign in with your club code',
   'cp-select-club':'Select your club','cp-access-code':'Access code',
-  'cp-default-code':'Default code: 1234','btn-cp-login':'Sign in',
+  'btn-cp-login':'Sign in',
   'cp-tab-resa':'Bookings','cp-tab-notifs':'Notifs','cp-tab-block':'Block','cp-tab-courts':'Courts',
   'cp-block-title':'🔒 Block a slot','cp-block-desc':'For phone bookings',
   'btn-block-slot':'🔒 Block this slot','btn-unblock':'🔓 Unblock',
